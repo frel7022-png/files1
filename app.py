@@ -75,6 +75,8 @@ def load_holdings() -> pd.DataFrame:
         for col in HOLD_COLUMNS:
             if col not in df.columns:
                 df[col] = "" if col in ("종목명", "종목코드", "섹터", "업데이트시각") else 0.0
+        for col in ("수량", "평단가", "현재가", "등락률"):
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
         return df[HOLD_COLUMNS]
     return pd.DataFrame(columns=HOLD_COLUMNS)
 
