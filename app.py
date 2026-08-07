@@ -6,6 +6,7 @@
 시세는 네이버 금융 비공식 공개 API를 사용합니다(종목코드 자동 검색 포함).
 """
 
+import calendar
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -335,15 +336,28 @@ def undo_last_transaction(holdings: pd.DataFrame, state: dict, tx: pd.DataFrame)
 # ------------------------------------------------------------------ #
 # 페이지 설정
 # ------------------------------------------------------------------ #
-st.set_page_config(page_title="포트폴리오", page_icon="📈", layout="centered")
+st.set_page_config(page_title="SP Orchestra", page_icon="◆", layout="centered")
 
 if "theme" not in st.session_state:
-    st.session_state["theme"] = "dark"
+    st.session_state["theme"] = "light"
 T = theme()
 
 st.markdown(f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&display=swap');
     .stApp {{ background-color: {T['bg']}; }}
+    .brand {{
+        font-family: 'Sora', sans-serif;
+        font-weight: 800;
+        font-size: 23px;
+        letter-spacing: 0.02em;
+        background: linear-gradient(90deg, #2DD4BF, #60A5FA);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        padding: 4px 0;
+    }}
+    div[data-testid="stToggle"] {{ display:flex; justify-content:flex-end; margin-top:8px; }}
     .block-container {{ padding-top: 1.1rem; padding-bottom: 2rem; padding-left: 1rem; padding-right: 1rem; max-width: 480px; }}
     #MainMenu, footer, header {{ visibility: hidden; }}
     h1, h2, h3, h4, h5, p, span, label, div {{ color: {T['text']}; }}
@@ -388,7 +402,7 @@ def check_password() -> bool:
         return True
     if st.session_state.get("authed"):
         return True
-    st.title("📈 포트폴리오")
+    st.markdown('<div class="brand">SP Orchestra</div>', unsafe_allow_html=True)
     pw = st.text_input("비밀번호를 입력하세요", type="password")
     if pw:
         if pw == st.secrets["app_password"]:
@@ -402,13 +416,14 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
-col_title, col_theme = st.columns([4, 1])
+col_title, col_theme = st.columns([3, 1])
 with col_title:
-    st.markdown("### 📈 포트폴리오")
+    st.markdown('<div class="brand">SP Orchestra</div>', unsafe_allow_html=True)
 with col_theme:
-    icon = "☀️" if st.session_state["theme"] == "dark" else "🌙"
-    if st.button(icon, help="화면 모드 전환", key="theme_toggle"):
-        st.session_state["theme"] = "light" if st.session_state["theme"] == "dark" else "dark"
+    is_dark = st.session_state["theme"] == "dark"
+    new_dark = st.toggle("다크", value=is_dark, key="theme_switch", label_visibility="collapsed")
+    if new_dark != is_dark:
+        st.session_state["theme"] = "dark" if new_dark else "light"
         st.rerun()
 
 holdings = load_holdings()
@@ -671,13 +686,81 @@ with tab_tx:
 
     st.divider()
 
-    # ---- 거래 내역 ----
+    # ---- 거래 내역 (캘린더) ----
     st.markdown("##### 거래 내역")
-    if tx.empty:
-        st.info("아직 기록된 거래가 없습니다.")
+
+    if "cal_year" not in st.session_state:
+        st.session_state.cal_year = now_kst().year
+        st.session_state.cal_month = now_kst().month
+    if "selected_tx_date" not in st.session_state:
+        st.session_state.selected_tx_date = today_kst_str()
+
+    tx_dates = set(tx["날짜"].astype(str))
+
+    nav1, nav2, nav3 = st.columns([1, 3, 1])
+    with nav1:
+        if st.button("◀", key="cal_prev", use_container_width=True):
+            m, y = st.session_state.cal_month - 1, st.session_state.cal_year
+            if m < 1:
+                m, y = 12, y - 1
+            st.session_state.cal_month, st.session_state.cal_year = m, y
+            st.rerun()
+    with nav2:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:700;padding-top:6px;color:{T['text']}'>"
+            f"{st.session_state.cal_year}년 {st.session_state.cal_month}월</div>",
+            unsafe_allow_html=True,
+        )
+    with nav3:
+        if st.button("▶", key="cal_next", use_container_width=True):
+            m, y = st.session_state.cal_month + 1, st.session_state.cal_year
+            if m > 12:
+                m, y = 1, y + 1
+            st.session_state.cal_month, st.session_state.cal_year = m, y
+            st.rerun()
+
+    wd_cols = st.columns(7)
+    for i, wd in enumerate(["일", "월", "화", "수", "목", "금", "토"]):
+        wd_cols[i].markdown(
+            f"<div style='text-align:center;font-size:11px;color:{T['muted2']}'>{wd}</div>",
+            unsafe_allow_html=True,
+        )
+
+    cal = calendar.Calendar(firstweekday=6)
+    weeks = cal.monthdayscalendar(st.session_state.cal_year, st.session_state.cal_month)
+    for week in weeks:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                if day == 0:
+                    st.write("")
+                    continue
+                d_str = f"{st.session_state.cal_year:04d}-{st.session_state.cal_month:02d}-{day:02d}"
+                has_tx = d_str in tx_dates
+                is_selected = d_str == st.session_state.selected_tx_date
+                label = f"{day} ●" if has_tx else f"{day}"
+                if st.button(label, key=f"day_{d_str}", use_container_width=True,
+                             type="primary" if is_selected else "secondary"):
+                    st.session_state.selected_tx_date = d_str
+                    st.rerun()
+
+    st.divider()
+
+    sel = st.session_state.selected_tx_date
+    day_tx = tx[tx["날짜"].astype(str) == sel]
+    day_realized = pd.to_numeric(day_tx.loc[day_tx["구분"] == "매도", "실현손익"], errors="coerce").sum()
+
+    head_html = f"<b style='color:{T['text']}'>{sel}</b>"
+    if day_realized:
+        rc = UP_COLOR if day_realized >= 0 else DOWN_COLOR
+        rs = "+" if day_realized >= 0 else ""
+        head_html += f" <span style='color:{rc};font-size:13px'>({rs}{day_realized:,.0f}원)</span>"
+    st.markdown(head_html, unsafe_allow_html=True)
+
+    if day_tx.empty:
+        st.info("이 날짜엔 기록된 거래가 없습니다.")
     else:
-        tx_sorted = tx.sort_values("날짜", ascending=False)
-        for _, r in tx_sorted.iterrows():
+        for _, r in day_tx.iterrows():
             realized = r["실현손익"]
             right_html = ""
             if r["구분"] == "매도" and str(realized) not in ("", "nan"):
@@ -690,7 +773,7 @@ with tab_tx:
             <div class="tx-card">
                 <div class="tx-left">
                     <span class="name">{r['종목명']}</span>
-                    <span class="meta">{r['날짜']} · {r['구분']} {float(r['수량']):.0f}주 @ {float(r['단가']):,.0f}원{memo_html}</span>
+                    <span class="meta">{r['구분']} {float(r['수량']):.0f}주 @ {float(r['단가']):,.0f}원{memo_html}</span>
                 </div>
                 <div class="tx-right">{right_html}</div>
             </div>
