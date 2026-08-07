@@ -420,22 +420,52 @@ st.markdown(f"""
         fill: {T['text']} !important;
     }}
 
-    input, textarea,
-    div[data-baseweb="select"] > div,
     div[data-baseweb="input"],
-    div[data-baseweb="base-input"] {{
+    div[data-baseweb="base-input"],
+    div[data-baseweb="textarea"] {{
         background-color: {T['card2']} !important;
-        border-color: {T['border']} !important;
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+    }}
+    div[data-baseweb="input"]:focus-within,
+    div[data-baseweb="base-input"]:focus-within,
+    div[data-baseweb="textarea"]:focus-within {{
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }}
+    input, textarea {{
+        background-color: transparent !important;
         color: {T['text']} !important;
     }}
-
-    /* 모바일에서도 컬럼(달력 등)이 세로로 쌓이지 않도록 고정 */
-    div[data-testid="stHorizontalBlock"] {{
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        gap: 4px !important;
+    button[data-testid="stNumberInputStepDown"],
+    button[data-testid="stNumberInputStepUp"],
+    button[data-testid="stNumberInputStepDown"]:hover,
+    button[data-testid="stNumberInputStepUp"]:hover {{
+        background-color: {T['card2']} !important;
+        border: 1px solid {T['border']} !important;
+        color: {T['text']} !important;
     }}
-    div[data-testid="column"] {{ min-width: 0 !important; }}
+    div[data-baseweb="select"] > div {{
+        background-color: {T['card2']} !important;
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+    }}
+    div[data-baseweb="select"] svg {{ fill: {T['muted']} !important; }}
+    div[data-testid="stDateInput"] input {{
+        background-color: {T['card2']} !important;
+    }}
+
+    /* 라디오/토글: 강조색을 무채색으로 눌러서 튀는 색 방지 */
+    div[data-testid="stToggle"] span {{ background-color: {T['card2']} !important; }}
+    div[role="radiogroup"] {{ flex-wrap: wrap !important; gap: 4px 10px !important; }}
+    div[role="radiogroup"] label {{
+        background-color: {T['card2']};
+        border: 1px solid {T['border']};
+        border-radius: 8px;
+        padding: 3px 10px;
+        margin: 0 !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -558,16 +588,17 @@ with tab_port:
             st.info("종목/예수금 데이터가 있으면 섹터 비중이 표시됩니다.")
 
     # ---- 종목별 보유현황 ----
+    SORT_OPTIONS = {"비중순": "weight", "섹터순": "sector", "현재가순": "price",
+                     "평가금액순": "valuation", "손익순": "profit"}
     if "sort_mode" not in st.session_state:
         st.session_state.sort_mode = "weight"
 
-    col_h, col_sector_sort = st.columns([3, 1.3])
-    with col_h:
-        st.markdown("##### 종목별 보유현황")
-    with col_sector_sort:
-        if st.button("섹터", key="sort_sector_btn", use_container_width=True):
-            st.session_state.sort_mode = "sector"
-            st.rerun()
+    st.markdown("##### 종목별 보유현황")
+    labels = list(SORT_OPTIONS.keys())
+    cur_label = next(k for k, v in SORT_OPTIONS.items() if v == st.session_state.sort_mode)
+    chosen = st.radio("정렬 기준", labels, index=labels.index(cur_label),
+                       horizontal=True, label_visibility="collapsed", key="sort_radio")
+    st.session_state.sort_mode = SORT_OPTIONS[chosen]
 
     sector_color_map = {}
     for i, s in enumerate(df.sort_values("평가금액", ascending=False)["섹터"].unique()):
@@ -594,19 +625,6 @@ with tab_port:
     if not rows:
         st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
     else:
-        hh1, hh2, hh3, hh4 = st.columns([0.7, 1.05, 1.05, 1.05])
-        with hh1:
-            st.markdown(f"<div style='font-size:10px;color:{T['muted2']};padding-top:9px;'>수량</div>", unsafe_allow_html=True)
-        with hh2:
-            if st.button("현재가/매입가", key="sort_price_btn", use_container_width=True):
-                st.session_state.sort_mode = "price"; st.rerun()
-        with hh3:
-            if st.button("평가금액/매입금액", key="sort_val_btn", use_container_width=True):
-                st.session_state.sort_mode = "valuation"; st.rerun()
-        with hh4:
-            if st.button("평가손익/수익률", key="sort_profit_btn", use_container_width=True):
-                st.session_state.sort_mode = "profit"; st.rerun()
-
         for r in rows:
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
             psign = "+" if r["손익"] >= 0 else ""
@@ -780,11 +798,12 @@ with tab_tx:
         st.session_state.selected_tx_date = today_kst_str()
 
     tx_dates = set(tx["날짜"].astype(str))
+    year, month = st.session_state.cal_year, st.session_state.cal_month
 
     nav1, nav2, nav3 = st.columns([1, 3, 1])
     with nav1:
         if st.button("◀", key="cal_prev", use_container_width=True):
-            m, y = st.session_state.cal_month - 1, st.session_state.cal_year
+            m, y = month - 1, year
             if m < 1:
                 m, y = 12, y - 1
             st.session_state.cal_month, st.session_state.cal_year = m, y
@@ -792,39 +811,37 @@ with tab_tx:
     with nav2:
         st.markdown(
             f"<div style='text-align:center;font-weight:700;padding-top:6px;color:{T['text']}'>"
-            f"{st.session_state.cal_year}년 {st.session_state.cal_month}월</div>",
+            f"{year}년 {month}월</div>",
             unsafe_allow_html=True,
         )
     with nav3:
         if st.button("▶", key="cal_next", use_container_width=True):
-            m, y = st.session_state.cal_month + 1, st.session_state.cal_year
+            m, y = month + 1, year
             if m > 12:
                 m, y = 1, y + 1
             st.session_state.cal_month, st.session_state.cal_year = m, y
             st.rerun()
 
-    wd_cols = st.columns(7)
-    for i, wd in enumerate(["일", "월", "화", "수", "목", "금", "토"]):
-        wd_cols[i].markdown(
-            f"<div style='text-align:center;font-size:11px;color:{T['muted2']}'>{wd}</div>",
-            unsafe_allow_html=True,
-        )
+    last_day = calendar.monthrange(year, month)[1]
+    day_options = list(range(1, last_day + 1))
 
-    cal = calendar.Calendar(firstweekday=6)
-    weeks = cal.monthdayscalendar(st.session_state.cal_year, st.session_state.cal_month)
-    for week in weeks:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            with cols[i]:
-                if day == 0:
-                    st.write("")
-                    continue
-                d_str = f"{st.session_state.cal_year:04d}-{st.session_state.cal_month:02d}-{day:02d}"
-                has_tx = d_str in tx_dates
-                label = f"{day}●" if has_tx else f"{day}"
-                if st.button(label, key=f"day_{d_str}", use_container_width=True):
-                    st.session_state.selected_tx_date = d_str
-                    st.rerun()
+    def _fmt_day(d):
+        d_str = f"{year:04d}-{month:02d}-{d:02d}"
+        return f"{d}●" if d_str in tx_dates else f"{d}"
+
+    if st.session_state.selected_tx_date.startswith(f"{year:04d}-{month:02d}"):
+        cur_day = int(st.session_state.selected_tx_date.split("-")[2])
+    else:
+        cur_day = min(now_kst().day, last_day) if (year, month) == (now_kst().year, now_kst().month) else 1
+    if cur_day not in day_options:
+        cur_day = 1
+
+    chosen_day = st.radio(
+        "날짜 선택", day_options, index=day_options.index(cur_day),
+        horizontal=True, format_func=_fmt_day, label_visibility="collapsed",
+        key=f"day_radio_{year}_{month}",
+    )
+    st.session_state.selected_tx_date = f"{year:04d}-{month:02d}-{chosen_day:02d}"
 
     st.divider()
 
