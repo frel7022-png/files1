@@ -485,6 +485,23 @@ st.markdown(f"""
         border: 1.5px solid {T['muted2']} !important;
         font-weight: 700;
     }}
+    /* 모든 가로 배치(달력 포함)를 어떤 화면 크기에서도 한 줄로 강제 */
+    div[data-testid="stHorizontalBlock"] {{
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 3px !important;
+    }}
+    div[data-testid="column"],
+    div[data-testid="stColumn"] {{
+        width: 0 !important;
+        min-width: 0 !important;
+        flex: 1 1 0 !important;
+        padding: 0 1px !important;
+    }}
+    div.stButton > button {{
+        padding-left: 0.2rem !important;
+        padding-right: 0.2rem !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -839,25 +856,38 @@ with tab_tx:
             st.rerun()
 
     last_day = calendar.monthrange(year, month)[1]
-    day_options = list(range(1, last_day + 1))
-
-    def _fmt_day(d):
-        d_str = f"{year:04d}-{month:02d}-{d:02d}"
-        return f"{d}●" if d_str in tx_dates else f"{d}"
 
     if st.session_state.selected_tx_date.startswith(f"{year:04d}-{month:02d}"):
         cur_day = int(st.session_state.selected_tx_date.split("-")[2])
     else:
         cur_day = min(now_kst().day, last_day) if (year, month) == (now_kst().year, now_kst().month) else 1
-    if cur_day not in day_options:
-        cur_day = 1
 
-    chosen_day = st.radio(
-        "날짜 선택", day_options, index=day_options.index(cur_day),
-        horizontal=True, format_func=_fmt_day, label_visibility="collapsed",
-        key=f"day_radio_{year}_{month}",
-    )
-    st.session_state.selected_tx_date = f"{year:04d}-{month:02d}-{chosen_day:02d}"
+    st.markdown('<div class="cal-grid">', unsafe_allow_html=True)
+    wd_cols = st.columns(7)
+    for i, wd in enumerate(["일", "월", "화", "수", "목", "금", "토"]):
+        wd_cols[i].markdown(
+            f"<div style='text-align:center;font-size:10.5px;color:{T['muted2']}'>{wd}</div>",
+            unsafe_allow_html=True,
+        )
+
+    cal_obj = calendar.Calendar(firstweekday=6)
+    weeks = cal_obj.monthdayscalendar(year, month)
+    for week in weeks:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                if day == 0:
+                    st.write("")
+                    continue
+                d_str = f"{year:04d}-{month:02d}-{day:02d}"
+                has_tx = d_str in tx_dates
+                is_sel = day == cur_day
+                label = f"{day}●" if has_tx else f"{day}"
+                if st.button(label, key=f"day_{d_str}", use_container_width=True,
+                             type="primary" if is_sel else "secondary"):
+                    st.session_state.selected_tx_date = d_str
+                    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.divider()
 
