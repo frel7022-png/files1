@@ -353,14 +353,15 @@ st.markdown(f"""
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
-    .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:12px 16px; margin-bottom:8px; }}
+    .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
-    .sector-tag {{ font-size:10.5px; padding:2px 7px; border-radius:5px; font-weight:600; }}
-    .stock-grid {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.05fr; gap:6px; margin-top:9px; }}
+    .stock-weight-inline {{ font-size:11px; color:{T['muted']}; margin-left:6px; }}
+    .sector-tag {{ font-size:10.5px; padding:2px 7px; border-radius:5px; font-weight:600; flex-shrink:0; }}
+    .stock-grid {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.3fr; gap:6px; margin-top:7px; }}
     .cell .top {{ font-size:12.5px; font-weight:700; color:{T['text']}; }}
     .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
-    .stock-foot {{ display:flex; justify-content:space-between; margin-top:8px; font-size:10.5px; color:{T['muted2']}; }}
+    .stock-foot {{ display:flex; justify-content:flex-end; margin-top:6px; font-size:10px; color:{T['muted2']}; }}
 
     .tx-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
@@ -420,23 +421,34 @@ st.markdown(f"""
         fill: {T['text']} !important;
     }}
 
+    div[data-testid="stTextInput"] div,
+    div[data-testid="stNumberInput"] div,
+    div[data-testid="stSelectbox"] div,
+    div[data-testid="stDateInput"] div,
+    div[data-testid="stTextArea"] div,
     div[data-baseweb="input"],
     div[data-baseweb="base-input"],
-    div[data-baseweb="textarea"] {{
+    div[data-baseweb="textarea"],
+    div[data-baseweb="select"] {{
         background-color: {T['card2']} !important;
-        border: 1px solid {T['border']} !important;
+        border-color: {T['border']} !important;
         box-shadow: none !important;
     }}
-    div[data-baseweb="input"]:focus-within,
-    div[data-baseweb="base-input"]:focus-within,
-    div[data-baseweb="textarea"]:focus-within {{
-        border: 1px solid {T['border']} !important;
-        box-shadow: none !important;
-        outline: none !important;
-    }}
-    input, textarea {{
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stNumberInput"] input,
+    div[data-testid="stSelectbox"] input,
+    div[data-testid="stDateInput"] input,
+    div[data-testid="stTextArea"] textarea,
+    input, textarea, select {{
         background-color: transparent !important;
         color: {T['text']} !important;
+        border: none !important;
+    }}
+    div[data-baseweb="input"],
+    div[data-baseweb="base-input"],
+    div[data-baseweb="select"] > div:first-child {{
+        border: 1px solid {T['border']} !important;
+        border-radius: 8px !important;
     }}
     button[data-testid="stNumberInputStepDown"],
     button[data-testid="stNumberInputStepUp"],
@@ -446,25 +458,32 @@ st.markdown(f"""
         border: 1px solid {T['border']} !important;
         color: {T['text']} !important;
     }}
-    div[data-baseweb="select"] > div {{
+    svg {{ fill: {T['muted']} !important; }}
+
+    /* 라디오/토글: 동그라미 표시를 완전히 숨기고 텍스트 알약(pill)만 남김 */
+    div[data-testid="stToggle"] span {{ background-color: {T['card2']} !important; }}
+    div[role="radiogroup"] {{
+        flex-wrap: wrap !important;
+        gap: 4px 6px !important;
+    }}
+    div[role="radiogroup"] label {{
         background-color: {T['card2']} !important;
         border: 1px solid {T['border']} !important;
-        box-shadow: none !important;
-    }}
-    div[data-baseweb="select"] svg {{ fill: {T['muted']} !important; }}
-    div[data-testid="stDateInput"] input {{
-        background-color: {T['card2']} !important;
-    }}
-
-    /* 라디오/토글: 강조색을 무채색으로 눌러서 튀는 색 방지 */
-    div[data-testid="stToggle"] span {{ background-color: {T['card2']} !important; }}
-    div[role="radiogroup"] {{ flex-wrap: wrap !important; gap: 4px 10px !important; }}
-    div[role="radiogroup"] label {{
-        background-color: {T['card2']};
-        border: 1px solid {T['border']};
-        border-radius: 8px;
-        padding: 3px 10px;
+        border-radius: 8px !important;
+        padding: 3px 9px !important;
         margin: 0 !important;
+        min-height: 0 !important;
+    }}
+    div[role="radiogroup"] label > div:first-child {{
+        display: none !important;
+    }}
+    div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {{
+        font-size: 12px !important;
+        color: {T['text']} !important;
+    }}
+    div[role="radiogroup"] label[aria-checked="true"] {{
+        border: 1.5px solid {T['muted2']} !important;
+        font-weight: 700;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -588,8 +607,8 @@ with tab_port:
             st.info("종목/예수금 데이터가 있으면 섹터 비중이 표시됩니다.")
 
     # ---- 종목별 보유현황 ----
-    SORT_OPTIONS = {"비중순": "weight", "섹터순": "sector", "현재가순": "price",
-                     "평가금액순": "valuation", "손익순": "profit"}
+    SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
+                     "평가금액": "valuation", "손익": "profit"}
     if "sort_mode" not in st.session_state:
         st.session_state.sort_mode = "weight"
 
@@ -634,7 +653,8 @@ with tab_port:
             st.markdown(f"""
             <div class="stock-card">
                 <div class="stock-top">
-                    <span class="stock-name">{r['종목명']}</span>
+                    <span><span class="stock-name">{r['종목명']}</span>
+                        <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
                     <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
                 </div>
                 <div class="stock-grid">
@@ -642,14 +662,10 @@ with tab_port:
                     <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
                     <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
                     <div class="cell">
-                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                        <div class="bottom" style="color:{pc}">{psign}{r['손익률']:.2f}%
-                            <span style="color:{cc}">· {csign}{r['등락률']:.2f}%</span>
-                        </div>
+                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f} · {psign}{r['손익률']:.1f}% <span style="color:{cc}">·{csign}{r['등락률']:.1f}%</span></div>
                     </div>
                 </div>
                 <div class="stock-foot">
-                    <span>비중 {r['비중']:.1f}%</span>
                     <span>{r['업데이트시각'] or '-'}</span>
                 </div>
             </div>
