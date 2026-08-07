@@ -1,5 +1,5 @@
 """
-한국 주식 포트폴리오 트래커 (Streamlit) — 모바일 최적화 + 거래기록/자산추이
+한국 주식 포트폴리오 트래커 (Streamlit) — 모바일 최적화 + 거래기록/자산추이 + 라이트/다크 모드
 ------------------------------------------------------------------
     streamlit run app.py
 
@@ -36,6 +36,21 @@ SECTOR_PALETTE = [
     "#2DD4BF", "#F5A623", "#A78BFA", "#34D399", "#F472B6",
     "#FBBF24", "#60A5FA", "#F87171", "#C084FC", "#38BDF8", "#FB923C",
 ]
+
+THEMES = {
+    "dark": {
+        "bg": "#0a0c10", "card": "#12151c", "card2": "#171b24", "border": "#232833",
+        "text": "#e8eaed", "muted": "#9aa4b2", "muted2": "#6b7280", "cash_dot": "#4b5563",
+    },
+    "light": {
+        "bg": "#f4f5f7", "card": "#ffffff", "card2": "#f0f1f4", "border": "#e2e4e9",
+        "text": "#1a1d23", "muted": "#5b6472", "muted2": "#7a8290", "cash_dot": "#9aa0ab",
+    },
+}
+
+
+def theme() -> dict:
+    return THEMES[st.session_state.get("theme", "dark")]
 
 
 def now_kst() -> datetime:
@@ -136,7 +151,6 @@ def resolve_code(name: str):
 
 
 def fetch_quotes(codes: list[str]) -> dict:
-    """{코드: {"price":..., "change_pct":...}}"""
     codes = [c.strip() for c in codes if c and str(c).strip() and str(c).lower() != "nan"]
     if not codes:
         return {}
@@ -231,7 +245,7 @@ def compute_metrics(df: pd.DataFrame, cash: float):
     total_assets = stock_valuation + cash
     df["비중"] = df["평가금액"].apply(lambda v: (v / total_assets * 100) if total_assets else 0)
 
-    unrealized_loss = -df.loc[df["손익"] < 0, "손익"].sum()  # 양수화
+    unrealized_loss = -df.loc[df["손익"] < 0, "손익"].sum()
     return df, stock_valuation, total_assets, unrealized_loss
 
 
@@ -301,7 +315,7 @@ def undo_last_transaction(holdings: pd.DataFrame, state: dict, tx: pd.DataFrame)
                 holdings = holdings.drop(index=i).reset_index(drop=True)
             else:
                 holdings.loc[i, "수량"] = new_qty
-    else:  # 매도 취소 → 다시 보유로 복원 (평단가는 매도 직전 값을 알 수 없어 매도가로 근사)
+    else:
         state["cash"] -= qty * price
         if len(match):
             i = match[0]
@@ -319,45 +333,51 @@ def undo_last_transaction(holdings: pd.DataFrame, state: dict, tx: pd.DataFrame)
 
 
 # ------------------------------------------------------------------ #
-# 페이지 설정 / 스타일
+# 페이지 설정
 # ------------------------------------------------------------------ #
 st.set_page_config(page_title="포트폴리오", page_icon="📈", layout="centered")
 
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "dark"
+T = theme()
+
 st.markdown(f"""
 <style>
+    .stApp {{ background-color: {T['bg']}; }}
     .block-container {{ padding-top: 1.1rem; padding-bottom: 2rem; padding-left: 1rem; padding-right: 1rem; max-width: 480px; }}
     #MainMenu, footer, header {{ visibility: hidden; }}
+    h1, h2, h3, h4, h5, p, span, label, div {{ color: {T['text']}; }}
 
-    .summary-box {{ background:#12151c; border-radius:14px; padding:18px 20px; margin-bottom:14px; }}
-    .summary-label {{ color:#9aa4b2; font-size:13px; margin-bottom:4px; }}
+    .summary-box {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:14px; padding:18px 20px; margin-bottom:14px; }}
+    .summary-label {{ color:{T['muted']}; font-size:13px; margin-bottom:4px; }}
     .summary-main {{ font-size:28px; font-weight:800; line-height:1.2; }}
     .summary-sub {{ font-size:14px; font-weight:600; margin-left:6px; }}
     .summary-grid {{ display:flex; flex-wrap:wrap; justify-content:space-between; margin-top:14px; gap:8px; }}
-    .summary-grid div {{ font-size:12.5px; color:#cfd4dc; min-width:29%; }}
-    .summary-grid b {{ display:block; font-size:15px; color:#fff; margin-top:2px; }}
-    .capital-line {{ margin-top:10px; padding-top:10px; border-top:1px solid #232833; font-size:12.5px; color:#9aa4b2; }}
+    .summary-grid div {{ font-size:12.5px; color:{T['muted']}; min-width:29%; }}
+    .summary-grid b {{ display:block; font-size:15px; color:{T['text']}; margin-top:2px; }}
+    .capital-line {{ margin-top:10px; padding-top:10px; border-top:1px solid {T['border']}; font-size:12.5px; color:{T['muted']}; }}
     .capital-line b {{ font-size:14px; }}
 
     .legend-wrap {{ display:flex; flex-wrap:wrap; gap:7px 14px; margin-top:10px; justify-content:center; }}
-    .legend-item {{ display:flex; align-items:center; gap:5px; font-size:12px; }}
+    .legend-item {{ display:flex; align-items:center; gap:5px; font-size:12px; color:{T['text']}; }}
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
-    .legend-pct {{ color:#8a94a6; font-family: ui-monospace, monospace; }}
+    .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
-    .stock-head-row {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.05fr; gap:6px; padding:0 16px; margin:14px 0 4px; font-size:10.5px; color:#6b7280; text-transform:uppercase; letter-spacing:.03em; }}
-    .stock-card {{ background:#12151c; border-radius:12px; padding:12px 16px; margin-bottom:8px; }}
+    .stock-head-row {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.05fr; gap:6px; padding:0 16px; margin:14px 0 4px; font-size:10.5px; color:{T['muted2']}; text-transform:uppercase; letter-spacing:.03em; }}
+    .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:12px 16px; margin-bottom:8px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
-    .stock-name {{ font-size:15px; font-weight:700; color:#fff; }}
+    .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
     .sector-tag {{ font-size:10.5px; padding:2px 7px; border-radius:5px; font-weight:600; }}
     .stock-grid {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.05fr; gap:6px; margin-top:9px; }}
-    .cell .top {{ font-size:12.5px; font-weight:700; color:#e8eaed; }}
-    .cell .bottom {{ font-size:11px; color:#8a94a6; margin-top:2px; }}
-    .stock-foot {{ display:flex; justify-content:space-between; margin-top:8px; font-size:10.5px; color:#6b7280; }}
+    .cell .top {{ font-size:12.5px; font-weight:700; color:{T['text']}; }}
+    .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
+    .stock-foot {{ display:flex; justify-content:space-between; margin-top:8px; font-size:10.5px; color:{T['muted2']}; }}
 
     div.stButton > button {{ border-radius:10px; height:2.6em; font-weight:600; }}
-    .tx-card {{ background:#12151c; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
+    .tx-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
-    .tx-left .name {{ font-weight:700; color:#fff; }}
-    .tx-left .meta {{ color:#8a94a6; font-size:11.5px; }}
+    .tx-left .name {{ font-weight:700; color:{T['text']}; }}
+    .tx-left .meta {{ color:{T['muted']}; font-size:11.5px; }}
     .tx-right {{ text-align:right; font-size:13px; font-weight:700; }}
 </style>
 """, unsafe_allow_html=True)
@@ -382,7 +402,14 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
-st.markdown("### 📈 포트폴리오")
+col_title, col_theme = st.columns([4, 1])
+with col_title:
+    st.markdown("### 📈 포트폴리오")
+with col_theme:
+    icon = "☀️" if st.session_state["theme"] == "dark" else "🌙"
+    if st.button(icon, help="화면 모드 전환", key="theme_toggle"):
+        st.session_state["theme"] = "light" if st.session_state["theme"] == "dark" else "dark"
+        st.rerun()
 
 holdings = load_holdings()
 state = load_state()
@@ -438,16 +465,14 @@ with tab_port:
             colors = [SECTOR_PALETTE[i % len(SECTOR_PALETTE)] for i in range(len(labels))]
             cash_idx = labels.index(CASH_LABEL) if CASH_LABEL in labels else None
             if cash_idx is not None:
-                colors[cash_idx] = "#4b5563"
+                colors[cash_idx] = T["cash_dot"]
 
-            fig, ax = plt.subplots(figsize=(3.1, 3.1))
+            fig, ax = plt.subplots(figsize=(4.6, 4.6))
             fig.patch.set_alpha(0)
             ax.pie(values, colors=colors, startangle=90, counterclock=False,
-                   wedgeprops=dict(width=0.42, edgecolor="#0a0c10", linewidth=3))
+                   wedgeprops=dict(width=0.38, edgecolor=T["bg"], linewidth=1.2))
             ax.set(aspect="equal")
-            col_l, col_c, col_r = st.columns([1, 2, 1])
-            with col_c:
-                st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, use_container_width=True)
             plt.close(fig)
 
             legend_html = '<div class="legend-wrap">'
@@ -504,7 +529,7 @@ with tab_port:
             </div>
             """, unsafe_allow_html=True)
 
-    # ---- 새로고침 / 종목 편집 (리스트 아래로 이동) ----
+    # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
     with col_r:
         refresh_clicked = st.button("🔄 시세 새로고침", use_container_width=True, type="primary", key="refresh_btn")
@@ -573,20 +598,20 @@ with tab_tx:
         x = range(len(hist))
         ax.plot(x, hist["총자산"], color=UP_COLOR, linewidth=2.2, marker="o", markersize=3, label="총자산")
         ax.plot(x, hist["조정자산"], color=DOWN_COLOR, linewidth=2.2, marker="o", markersize=3, label="총자산+미실현손실")
-        ax.axhline(state["initial"], color="#6b7280", linewidth=1, linestyle="--")
+        ax.axhline(state["initial"], color=T["muted2"], linewidth=1, linestyle="--")
         ax.set_xticks(list(x))
-        ax.set_xticklabels([d[5:] for d in hist["날짜"]], fontsize=8, color="#9aa4b2")
-        ax.tick_params(axis="y", labelsize=8, colors="#9aa4b2")
+        ax.set_xticklabels([d[5:] for d in hist["날짜"]], fontsize=8, color=T["muted"])
+        ax.tick_params(axis="y", labelsize=8, colors=T["muted"])
         for spine in ax.spines.values():
             spine.set_visible(False)
-        ax.grid(axis="y", color="#232833", linewidth=0.6)
+        ax.grid(axis="y", color=T["border"], linewidth=0.6)
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
         st.markdown(f"""
         <div class="legend-wrap">
             <div class="legend-item"><span class="legend-dot" style="background:{UP_COLOR}"></span>총자산(빨강)</div>
             <div class="legend-item"><span class="legend-dot" style="background:{DOWN_COLOR}"></span>총자산+미실현손실(파랑)</div>
-            <div class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>최초자본 1,000만원(점선)</div>
+            <div class="legend-item"><span class="legend-dot" style="background:{T['muted2']}"></span>최초자본 1,000만원(점선)</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -633,7 +658,6 @@ with tab_tx:
             st.success(msg)
             st.rerun()
 
-    # ---- 마지막 거래 취소 ----
     if st.button("↩️ 마지막 거래 취소", use_container_width=True):
         holdings2, state2, tx2, undone = undo_last_transaction(holdings, state, tx)
         if undone is None:
