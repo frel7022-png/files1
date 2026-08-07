@@ -1,5 +1,5 @@
 """
-한국 주식 포트폴리오 트래커 (Streamlit) — 모바일 최적화 + 거래기록/자산추이 + 라이트/다크 모드
+한국 주식 포트폴리오 트래커 (Streamlit) — SP Orchestra
 ------------------------------------------------------------------
     streamlit run app.py
 
@@ -40,18 +40,18 @@ SECTOR_PALETTE = [
 
 THEMES = {
     "dark": {
-        "bg": "#0a0c10", "card": "#12151c", "card2": "#171b24", "border": "#232833",
+        "bg": "#0a0c10", "card": "#12151c", "card2": "#20242e", "border": "#2b303c",
         "text": "#e8eaed", "muted": "#9aa4b2", "muted2": "#6b7280", "cash_dot": "#4b5563",
     },
     "light": {
-        "bg": "#f4f5f7", "card": "#ffffff", "card2": "#f0f1f4", "border": "#e2e4e9",
+        "bg": "#f4f5f7", "card": "#ffffff", "card2": "#eceef1", "border": "#e2e4e9",
         "text": "#1a1d23", "muted": "#5b6472", "muted2": "#7a8290", "cash_dot": "#9aa0ab",
     },
 }
 
 
 def theme() -> dict:
-    return THEMES[st.session_state.get("theme", "dark")]
+    return THEMES[st.session_state.get("theme", "light")]
 
 
 def now_kst() -> datetime:
@@ -66,17 +66,31 @@ def now_kst_str() -> str:
     return now_kst().strftime("%m/%d %H:%M")
 
 
+def clean_str(x) -> str:
+    """pd.NA / NaN / None 안전하게 빈 문자열로 처리."""
+    if x is None or (isinstance(x, float) and pd.isna(x)) or (x is pd.NA):
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(x).strip()
+
+
 # ------------------------------------------------------------------ #
 # 데이터 로드 / 저장
 # ------------------------------------------------------------------ #
 def load_holdings() -> pd.DataFrame:
     if HOLDINGS_FILE.exists():
-        df = pd.read_csv(HOLDINGS_FILE, dtype={"종목코드": str})
+        df = pd.read_csv(HOLDINGS_FILE, dtype={"종목코드": str}, keep_default_na=False, na_values=[""])
         for col in HOLD_COLUMNS:
             if col not in df.columns:
                 df[col] = "" if col in ("종목명", "종목코드", "섹터", "업데이트시각") else 0.0
         for col in ("수량", "평단가", "현재가", "등락률"):
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+        for col in ("종목명", "종목코드", "섹터", "업데이트시각"):
+            df[col] = df[col].apply(clean_str)
         return df[HOLD_COLUMNS]
     return pd.DataFrame(columns=HOLD_COLUMNS)
 
@@ -87,7 +101,7 @@ def save_holdings(df: pd.DataFrame) -> None:
 
 def load_transactions() -> pd.DataFrame:
     if TX_FILE.exists():
-        df = pd.read_csv(TX_FILE, dtype={"id": str})
+        df = pd.read_csv(TX_FILE, dtype={"id": str}, keep_default_na=False, na_values=[""])
         for col in TX_COLUMNS:
             if col not in df.columns:
                 df[col] = ""
@@ -154,7 +168,7 @@ def resolve_code(name: str):
 
 
 def fetch_quotes(codes: list[str]) -> dict:
-    codes = [c.strip() for c in codes if c and str(c).strip() and str(c).lower() != "nan"]
+    codes = [c for c in codes if c]
     if not codes:
         return {}
     url = f"https://polling.finance.naver.com/api/realtime/domestic/stock/{','.join(codes)}"
@@ -197,21 +211,22 @@ def refresh_all_prices(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     unresolved = []
     for i, row in df.iterrows():
-        code = str(row.get("종목코드", "") or "").strip()
+        code = clean_str(row.get("종목코드", ""))
         if not code or code.lower() == "nan":
-            code = resolve_code(row["종목명"])
-            if code:
-                df.loc[i, "종목코드"] = code
+            found = resolve_code(row["종목명"])
+            if found:
+                df.loc[i, "종목코드"] = found
             else:
                 unresolved.append(row["종목명"])
 
-    codes = [c for c in df["종목코드"].astype(str).tolist() if c and c.lower() != "nan"]
+    codes = [clean_str(c) for c in df["종목코드"].tolist()]
+    codes = [c for c in codes if c and c.lower() != "nan"]
     quotes = fetch_quotes(codes)
 
     now = now_kst_str()
     updated, failed = 0, []
     for i, row in df.iterrows():
-        code = str(row.get("종목코드", "") or "").strip()
+        code = clean_str(row.get("종목코드", ""))
         if code and code in quotes:
             df.loc[i, "현재가"] = quotes[code]["price"]
             df.loc[i, "등락률"] = quotes[code]["change_pct"]
@@ -298,43 +313,6 @@ def apply_transaction(holdings: pd.DataFrame, state: dict, name: str, kind: str,
     return holdings, state, realized
 
 
-def undo_last_transaction(holdings: pd.DataFrame, state: dict, tx: pd.DataFrame):
-    applied = tx[tx["정산반영"].astype(str) == "True"]
-    if applied.empty:
-        return holdings, state, tx, None
-    last = applied.iloc[-1]
-    qty = float(last["수량"])
-    price = float(last["단가"])
-    name = last["종목명"]
-    holdings = holdings.copy()
-    match = holdings.index[holdings["종목명"] == name]
-
-    if last["구분"] == "매수":
-        state["cash"] += qty * price
-        if len(match):
-            i = match[0]
-            new_qty = float(holdings.loc[i, "수량"]) - qty
-            if new_qty <= 0:
-                holdings = holdings.drop(index=i).reset_index(drop=True)
-            else:
-                holdings.loc[i, "수량"] = new_qty
-    else:
-        state["cash"] -= qty * price
-        if len(match):
-            i = match[0]
-            old_qty = float(holdings.loc[i, "수량"])
-            holdings.loc[i, "수량"] = old_qty + qty
-        else:
-            new_row = {c: "" for c in HOLD_COLUMNS}
-            new_row.update({"종목명": name, "종목코드": "", "섹터": "미분류",
-                             "수량": qty, "평단가": price, "현재가": price,
-                             "등락률": 0, "업데이트시각": now_kst_str()})
-            holdings = pd.concat([holdings, pd.DataFrame([new_row])], ignore_index=True)
-
-    tx = tx[tx["id"] != last["id"]].reset_index(drop=True)
-    return holdings, state, tx, last
-
-
 # ------------------------------------------------------------------ #
 # 페이지 설정
 # ------------------------------------------------------------------ #
@@ -353,13 +331,9 @@ st.markdown(f"""
         font-weight: 800;
         font-size: 23px;
         letter-spacing: 0.02em;
-        background: linear-gradient(90deg, #2DD4BF, #60A5FA);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: {T['text']};
         padding: 4px 0;
     }}
-    div[data-testid="stToggle"] {{ display:flex; justify-content:flex-end; margin-top:8px; }}
     .block-container {{ padding-top: 1.1rem; padding-bottom: 2rem; padding-left: 1rem; padding-right: 1rem; max-width: 480px; }}
     #MainMenu, footer, header {{ visibility: hidden; }}
     h1, h2, h3, h4, h5, p, span, label, div {{ color: {T['text']}; }}
@@ -379,7 +353,6 @@ st.markdown(f"""
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
-    .stock-head-row {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.05fr; gap:6px; padding:0 16px; margin:14px 0 4px; font-size:10.5px; color:{T['muted2']}; text-transform:uppercase; letter-spacing:.03em; }}
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:12px 16px; margin-bottom:8px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
@@ -389,12 +362,80 @@ st.markdown(f"""
     .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
     .stock-foot {{ display:flex; justify-content:space-between; margin-top:8px; font-size:10.5px; color:{T['muted2']}; }}
 
-    div.stButton > button {{ border-radius:10px; height:2.6em; font-weight:600; }}
     .tx-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
     .tx-left .name {{ font-weight:700; color:{T['text']}; }}
     .tx-left .meta {{ color:{T['muted']}; font-size:11.5px; }}
     .tx-right {{ text-align:right; font-size:13px; font-weight:700; }}
+
+    /* ---- 옅은/짙은 회색 버튼: 눌러도 색 안 바뀌게 강제 고정 ---- */
+    div.stButton > button,
+    div.stButton > button:hover,
+    div.stButton > button:active,
+    div.stButton > button:focus,
+    div.stButton > button:focus:not(:active) {{
+        background-color: {T['card2']} !important;
+        color: {T['text']} !important;
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+        border-radius: 10px;
+        font-weight: 600;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding-left: 0.35rem;
+        padding-right: 0.35rem;
+    }}
+    div.stButton > button p {{ color: {T['text']} !important; }}
+    div.stFormSubmitButton > button,
+    div.stFormSubmitButton > button:hover,
+    div.stFormSubmitButton > button:active,
+    div.stFormSubmitButton > button:focus {{
+        background-color: {T['card2']} !important;
+        color: {T['text']} !important;
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+    }}
+    div[data-testid="stPopover"] > div > button,
+    div[data-testid="stPopover"] > div > button:hover,
+    div[data-testid="stPopover"] > div > button:active,
+    div[data-testid="stPopover"] > div > button:focus {{
+        background-color: {T['card2']} !important;
+        color: {T['text']} !important;
+        border: 1px solid {T['border']} !important;
+        box-shadow: none !important;
+    }}
+
+    [data-testid="stExpander"] {{
+        background-color: {T['card']} !important;
+        border: 1px solid {T['border']} !important;
+        border-radius: 12px !important;
+    }}
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary:hover,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] svg {{
+        color: {T['text']} !important;
+        fill: {T['text']} !important;
+    }}
+
+    input, textarea,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"],
+    div[data-baseweb="base-input"] {{
+        background-color: {T['card2']} !important;
+        border-color: {T['border']} !important;
+        color: {T['text']} !important;
+    }}
+
+    /* 모바일에서도 컬럼(달력 등)이 세로로 쌓이지 않도록 고정 */
+    div[data-testid="stHorizontalBlock"] {{
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
+    }}
+    div[data-testid="column"] {{ min-width: 0 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -432,7 +473,7 @@ holdings = load_holdings()
 state = load_state()
 tx = load_transactions()
 
-tab_port, tab_tx = st.tabs(["📈 포트폴리오", "📒 거래 기록"])
+tab_port, tab_tx = st.tabs(["포트폴리오", "거래 기록"])
 
 # ==================================================================== #
 # 탭 1: 포트폴리오
@@ -446,10 +487,18 @@ with tab_port:
     capital_return = total_assets - state["initial"]
     capital_return_pct = (capital_return / state["initial"] * 100) if state["initial"] else 0
 
+    today_str = today_kst_str()
+    today_tx = tx[tx["날짜"].astype(str) == today_str]
+    daily_pnl = pd.to_numeric(
+        today_tx.loc[today_tx["구분"] == "매도", "실현손익"], errors="coerce"
+    ).sum()
+
     color = UP_COLOR if stock_profit >= 0 else DOWN_COLOR
     sign = "+" if stock_profit >= 0 else ""
     cap_color = UP_COLOR if capital_return >= 0 else DOWN_COLOR
     cap_sign = "+" if capital_return >= 0 else ""
+    daily_color = UP_COLOR if daily_pnl > 0 else (DOWN_COLOR if daily_pnl < 0 else T["muted"])
+    daily_sign = "+" if daily_pnl > 0 else ""
 
     st.markdown(f"""
     <div class="summary-box">
@@ -461,6 +510,7 @@ with tab_port:
             <div>총 매입<b>{total_cost:,.0f}원</b></div>
             <div>총 평가<b>{stock_valuation:,.0f}원</b></div>
             <div>총자산<b>{total_assets:,.0f}원</b></div>
+            <div>일일손익<b style="color:{daily_color}">{daily_sign}{daily_pnl:,.0f}원</b></div>
             <div>보유종목<b>{len(df)}개</b></div>
         </div>
         <div class="capital-line">최초 자본 10,000,000원 대비&nbsp;
@@ -469,14 +519,18 @@ with tab_port:
     </div>
     """, unsafe_allow_html=True)
 
-    # ---- 섹터 비중 도넛 (예수금 포함) ----
-    with st.expander("🧩 섹터 비중 보기 (예수금 포함)", expanded=False):
+    # ---- 섹터 비중 도넛 ----
+    with st.expander("섹터 비중 보기", expanded=False):
+        include_cash = st.toggle("예수금 포함", value=st.session_state.get("include_cash", True), key="cash_toggle")
+        st.session_state["include_cash"] = include_cash
+
         sector_val = df.groupby("섹터")["평가금액"].sum().to_dict()
-        if state["cash"] > 0:
+        if include_cash and state["cash"] > 0:
             sector_val[CASH_LABEL] = state["cash"]
         sector_items = sorted(sector_val.items(), key=lambda x: x[1], reverse=True)
+        denom = sum(v for _, v in sector_items)
 
-        if total_assets > 0 and sector_items:
+        if denom > 0 and sector_items:
             labels = [s for s, _ in sector_items]
             values = [v for _, v in sector_items]
             colors = [SECTOR_PALETTE[i % len(SECTOR_PALETTE)] for i in range(len(labels))]
@@ -487,14 +541,14 @@ with tab_port:
             fig, ax = plt.subplots(figsize=(4.6, 4.6))
             fig.patch.set_alpha(0)
             ax.pie(values, colors=colors, startangle=90, counterclock=False,
-                   wedgeprops=dict(width=0.38, edgecolor=T["bg"], linewidth=1.2))
+                   wedgeprops=dict(width=0.38, edgecolor=T["card"], linewidth=1.2))
             ax.set(aspect="equal")
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
 
             legend_html = '<div class="legend-wrap">'
             for lbl, val, c in zip(labels, values, colors):
-                pct = val / total_assets * 100
+                pct = val / denom * 100
                 legend_html += (f'<div class="legend-item"><span class="legend-dot" '
                                  f'style="background:{c}"></span>{lbl} '
                                  f'<span class="legend-pct">{pct:.1f}%</span></div>')
@@ -504,18 +558,55 @@ with tab_port:
             st.info("종목/예수금 데이터가 있으면 섹터 비중이 표시됩니다.")
 
     # ---- 종목별 보유현황 ----
-    st.markdown("##### 종목별 보유현황")
+    if "sort_mode" not in st.session_state:
+        st.session_state.sort_mode = "weight"
+
+    col_h, col_sector_sort = st.columns([3, 1.3])
+    with col_h:
+        st.markdown("##### 종목별 보유현황")
+    with col_sector_sort:
+        if st.button("섹터", key="sort_sector_btn", use_container_width=True):
+            st.session_state.sort_mode = "sector"
+            st.rerun()
 
     sector_color_map = {}
     for i, s in enumerate(df.sort_values("평가금액", ascending=False)["섹터"].unique()):
         sector_color_map[s] = SECTOR_PALETTE[i % len(SECTOR_PALETTE)]
 
-    rows = df.sort_values("비중", ascending=False).to_dict("records")
-    if not rows:
-        st.info("보유 종목이 없습니다. 아래 '✏️ 종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
+    mode = st.session_state.sort_mode
+    if mode == "sector":
+        sector_totals = df.groupby("섹터")["평가금액"].sum().sort_values(ascending=False)
+        sector_order = {s: i for i, s in enumerate(sector_totals.index)}
+        df_sorted = df.copy()
+        df_sorted["_rank"] = df_sorted["섹터"].map(sector_order)
+        df_sorted = df_sorted.sort_values(["_rank", "평가금액"], ascending=[True, False])
+    elif mode == "price":
+        df_sorted = df.sort_values("현재가", ascending=False)
+    elif mode == "valuation":
+        df_sorted = df.sort_values("평가금액", ascending=False)
+    elif mode == "profit":
+        df_sorted = df.sort_values("손익", ascending=False)
     else:
-        st.markdown('<div class="stock-head-row"><span>수량</span><span>현재가/매입가</span>'
-                     '<span>평가금액/매입금액</span><span>평가손익/수익률</span></div>', unsafe_allow_html=True)
+        df_sorted = df.sort_values("비중", ascending=False)
+
+    rows = df_sorted.to_dict("records")
+
+    if not rows:
+        st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
+    else:
+        hh1, hh2, hh3, hh4 = st.columns([0.7, 1.05, 1.05, 1.05])
+        with hh1:
+            st.markdown(f"<div style='font-size:10px;color:{T['muted2']};padding-top:9px;'>수량</div>", unsafe_allow_html=True)
+        with hh2:
+            if st.button("현재가/매입가", key="sort_price_btn", use_container_width=True):
+                st.session_state.sort_mode = "price"; st.rerun()
+        with hh3:
+            if st.button("평가금액/매입금액", key="sort_val_btn", use_container_width=True):
+                st.session_state.sort_mode = "valuation"; st.rerun()
+        with hh4:
+            if st.button("평가손익/수익률", key="sort_profit_btn", use_container_width=True):
+                st.session_state.sort_mode = "profit"; st.rerun()
+
         for r in rows:
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
             psign = "+" if r["손익"] >= 0 else ""
@@ -549,9 +640,9 @@ with tab_port:
     # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
     with col_r:
-        refresh_clicked = st.button("🔄 시세 새로고침", use_container_width=True, type="primary", key="refresh_btn")
+        refresh_clicked = st.button("시세 새로고침", use_container_width=True, key="refresh_btn")
     with col_e:
-        with st.popover("✏️ 종목 편집", use_container_width=True):
+        with st.popover("종목 편집", use_container_width=True):
             st.caption("종목코드는 몰라도 됩니다 — 종목명만 정확히 입력하면 새로고침할 때 자동으로 찾아옵니다.")
             edited = st.data_editor(
                 holdings,
@@ -567,7 +658,7 @@ with tab_port:
                 },
                 key="editor",
             )
-            if st.button("💾 저장", use_container_width=True, key="save_edit_btn"):
+            if st.button("저장", use_container_width=True, key="save_edit_btn"):
                 save_holdings(edited)
                 st.success("저장했습니다.")
                 st.rerun()
@@ -609,13 +700,16 @@ with tab_tx:
     hist = load_history()
     if len(hist) >= 1:
         hist = hist.sort_values("날짜")
+        profit_series = hist["총자산"] - state["initial"]       # 누적 수익금 (0에서 시작)
+        loss_series = hist["조정자산"] - hist["총자산"]          # 미실현 손실 합계
+
         fig, ax = plt.subplots(figsize=(4.2, 2.6))
         fig.patch.set_alpha(0)
         ax.set_facecolor("none")
         x = range(len(hist))
-        ax.plot(x, hist["총자산"], color=UP_COLOR, linewidth=2.2, marker="o", markersize=3, label="총자산")
-        ax.plot(x, hist["조정자산"], color=DOWN_COLOR, linewidth=2.2, marker="o", markersize=3, label="총자산+미실현손실")
-        ax.axhline(state["initial"], color=T["muted2"], linewidth=1, linestyle="--")
+        ax.plot(x, profit_series, color=UP_COLOR, linewidth=2.2, marker="o", markersize=3, label="수익금")
+        ax.plot(x, loss_series, color=DOWN_COLOR, linewidth=2.2, marker="o", markersize=3, label="미실현손실")
+        ax.axhline(0, color=T["muted2"], linewidth=1, linestyle="--")
         ax.set_xticks(list(x))
         ax.set_xticklabels([d[5:] for d in hist["날짜"]], fontsize=8, color=T["muted"])
         ax.tick_params(axis="y", labelsize=8, colors=T["muted"])
@@ -626,9 +720,8 @@ with tab_tx:
         plt.close(fig)
         st.markdown(f"""
         <div class="legend-wrap">
-            <div class="legend-item"><span class="legend-dot" style="background:{UP_COLOR}"></span>총자산(빨강)</div>
-            <div class="legend-item"><span class="legend-dot" style="background:{DOWN_COLOR}"></span>총자산+미실현손실(파랑)</div>
-            <div class="legend-item"><span class="legend-dot" style="background:{T['muted2']}"></span>최초자본 1,000만원(점선)</div>
+            <div class="legend-item"><span class="legend-dot" style="background:{UP_COLOR}"></span>수익금(누적, 0부터)</div>
+            <div class="legend-item"><span class="legend-dot" style="background:{DOWN_COLOR}"></span>미실현손실 합계</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -648,7 +741,7 @@ with tab_tx:
             tx_qty = st.number_input("수량", min_value=0, step=1)
         tx_price = st.number_input("단가", min_value=0, step=100)
         tx_memo = st.text_input("메모 (선택)", placeholder="예: 분할매수 1차")
-        submitted = st.form_submit_button("💾 기록 저장", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("기록 저장", use_container_width=True)
 
     if submitted:
         if not tx_name or tx_qty <= 0 or tx_price <= 0:
@@ -673,17 +766,6 @@ with tab_tx:
             if realized is not None:
                 msg += f" (실현손익 {realized:+,.0f}원)"
             st.success(msg)
-            st.rerun()
-
-    if st.button("↩️ 마지막 거래 취소", use_container_width=True):
-        holdings2, state2, tx2, undone = undo_last_transaction(holdings, state, tx)
-        if undone is None:
-            st.warning("취소할 거래 기록이 없습니다.")
-        else:
-            save_holdings(holdings2)
-            save_state(state2)
-            save_transactions(tx2)
-            st.success(f"취소됨: {undone['날짜']} {undone['종목명']} {undone['구분']} {float(undone['수량']):.0f}주")
             st.rerun()
 
     st.divider()
@@ -739,10 +821,8 @@ with tab_tx:
                     continue
                 d_str = f"{st.session_state.cal_year:04d}-{st.session_state.cal_month:02d}-{day:02d}"
                 has_tx = d_str in tx_dates
-                is_selected = d_str == st.session_state.selected_tx_date
-                label = f"{day} ●" if has_tx else f"{day}"
-                if st.button(label, key=f"day_{d_str}", use_container_width=True,
-                             type="primary" if is_selected else "secondary"):
+                label = f"{day}●" if has_tx else f"{day}"
+                if st.button(label, key=f"day_{d_str}", use_container_width=True):
                     st.session_state.selected_tx_date = d_str
                     st.rerun()
 
