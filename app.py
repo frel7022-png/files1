@@ -767,15 +767,22 @@ with tab_tx:
     st.markdown("##### 자산 추이")
     hist = load_history()
     if len(hist) >= 1:
-        hist = hist.sort_values("날짜")
-        profit_series = hist["총자산"] - state["initial"]       # 누적 수익금 (0에서 시작)
-        loss_series = hist["조정자산"] - hist["총자산"]          # 미실현 손실 합계
+        hist = hist.sort_values("날짜").reset_index(drop=True)
+
+        tx_realized = tx[tx["구분"] == "매도"].copy()
+        tx_realized["실현손익"] = pd.to_numeric(tx_realized["실현손익"], errors="coerce").fillna(0)
+
+        def _cum_realized_as_of(d):
+            return tx_realized.loc[tx_realized["날짜"] <= d, "실현손익"].sum()
+
+        profit_series = hist["날짜"].apply(_cum_realized_as_of)  # 누적 실현손익 (마이너스면 그대로 마이너스)
+        loss_series = hist["조정자산"] - hist["총자산"]           # 미실현 손실 합계
 
         fig, ax = plt.subplots(figsize=(4.2, 2.6))
         fig.patch.set_alpha(0)
         ax.set_facecolor("none")
         x = range(len(hist))
-        ax.plot(x, profit_series, color=UP_COLOR, linewidth=2.2, marker="o", markersize=3, label="수익금")
+        ax.plot(x, profit_series, color=UP_COLOR, linewidth=2.2, marker="o", markersize=3, label="실현손익")
         ax.plot(x, loss_series, color=DOWN_COLOR, linewidth=2.2, marker="o", markersize=3, label="미실현손실")
         ax.axhline(0, color=T["muted2"], linewidth=1, linestyle="--")
         ax.set_xticks(list(x))
@@ -788,7 +795,7 @@ with tab_tx:
         plt.close(fig)
         st.markdown(f"""
         <div class="legend-wrap">
-            <div class="legend-item"><span class="legend-dot" style="background:{UP_COLOR}"></span>수익금(누적, 0부터)</div>
+            <div class="legend-item"><span class="legend-dot" style="background:{UP_COLOR}"></span>누적 실현손익</div>
             <div class="legend-item"><span class="legend-dot" style="background:{DOWN_COLOR}"></span>미실현손실 합계</div>
         </div>
         """, unsafe_allow_html=True)
