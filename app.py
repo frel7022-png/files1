@@ -463,23 +463,29 @@ st.markdown(f"""
     /* 라디오/토글: 동그라미 표시를 완전히 숨기고 텍스트 알약(pill)만 남김 */
     div[data-testid="stToggle"] span {{ background-color: {T['card2']} !important; }}
     div[role="radiogroup"] {{
-        flex-wrap: wrap !important;
-        gap: 4px 6px !important;
+        flex-wrap: nowrap !important;
+        gap: 3px 4px !important;
     }}
     div[role="radiogroup"] label {{
         background-color: {T['card2']} !important;
         border: 1px solid {T['border']} !important;
-        border-radius: 8px !important;
-        padding: 3px 9px !important;
+        border-radius: 7px !important;
+        padding: 2px 6px !important;
         margin: 0 !important;
         min-height: 0 !important;
+        flex-shrink: 1 !important;
     }}
-    div[role="radiogroup"] label > div:first-child {{
+    div[role="radiogroup"] label > *:first-child,
+    div[role="radiogroup"] label svg,
+    div[role="radiogroup"] [data-baseweb="radio"] > div:first-child {{
         display: none !important;
+        width: 0 !important;
+        height: 0 !important;
     }}
     div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {{
-        font-size: 12px !important;
+        font-size: 11px !important;
         color: {T['text']} !important;
+        white-space: nowrap;
     }}
     div[role="radiogroup"] label[aria-checked="true"] {{
         border: 1.5px solid {T['muted2']} !important;
@@ -629,7 +635,20 @@ with tab_port:
     if "sort_mode" not in st.session_state:
         st.session_state.sort_mode = "weight"
 
-    st.markdown("##### 종목별 보유현황")
+    last_updated = ""
+    updated_vals = [v for v in df["업데이트시각"].tolist() if v]
+    if updated_vals:
+        last_updated = max(updated_vals)
+
+    col_title2, col_updated = st.columns([2, 1.3])
+    with col_title2:
+        st.markdown("##### 종목별 보유현황")
+    with col_updated:
+        st.markdown(
+            f"<div style='text-align:right;font-size:11px;color:{T['muted2']};padding-top:10px;'>{last_updated}</div>",
+            unsafe_allow_html=True,
+        )
+
     labels = list(SORT_OPTIONS.keys())
     cur_label = next(k for k, v in SORT_OPTIONS.items() if v == st.session_state.sort_mode)
     chosen = st.radio("정렬 기준", labels, index=labels.index(cur_label),
@@ -679,11 +698,9 @@ with tab_port:
                     <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
                     <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
                     <div class="cell">
-                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f} · {psign}{r['손익률']:.1f}% <span style="color:{cc}">·{csign}{r['등락률']:.1f}%</span></div>
+                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                        <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
                     </div>
-                </div>
-                <div class="stock-foot">
-                    <span>{r['업데이트시각'] or '-'}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
