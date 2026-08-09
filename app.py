@@ -355,26 +355,12 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
-    .stock-card-visual {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; pointer-events:none; }}
-
-    /* 카드 박스 전체를 클릭 가능하게: 카드와 투명 버튼을 같은 칸에 겹쳐서 배치 */
-    div[class*="st-key-cardbox_"] {{
-        display: grid !important;
-        margin-bottom: 7px;
-    }}
-    div[class*="st-key-cardbox_"] > div {{
-        grid-column: 1;
-        grid-row: 1;
-    }}
-    div[class*="st-key-cardbox_"] div.stButton {{
-        height: 100%;
-    }}
-    div[class*="st-key-cardbox_"] div.stButton > button {{
-        opacity: 0;
-        height: 100% !important;
-        min-height: 100% !important;
-        border: none !important;
-        background: transparent !important;
+    div[class*="st-key-cardbtn_"] {{ margin-top:-9px; margin-bottom:7px; }}
+    div[class*="st-key-cardbtn_"] > button {{
+        border-radius: 0 0 10px 10px !important;
+        font-size: 11px !important;
+        min-height: 1.8em !important;
+        height: 1.8em !important;
     }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
@@ -807,27 +793,25 @@ with tab_port:
                 csign = "+" if r["등락률"] >= 0 else ""
                 sc = sector_color_map.get(r["섹터"], "#6b7280")
 
-                box = st.container(key=f"cardbox_{idx}")
-                with box:
-                    st.markdown(f"""
-                    <div class="stock-card-visual">
-                        <div class="stock-top">
-                            <span><span class="stock-name">{r['종목명']}</span>
-                                <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                            <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-                        </div>
-                        <div class="stock-grid">
-                            <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                            <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                            <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                            <div class="cell">
-                                <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                                <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
-                            </div>
+                st.markdown(f"""
+                <div class="stock-card">
+                    <div class="stock-top">
+                        <span><span class="stock-name">{r['종목명']}</span>
+                            <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                        <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
+                    </div>
+                    <div class="stock-grid">
+                        <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                        <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                        <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                        <div class="cell">
+                            <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                            <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
                         </div>
                     </div>
-                    """, unsafe_allow_html=True)
-                    clicked = st.button(" ", key=f"cardbtn_{idx}", use_container_width=True)
+                </div>
+                """, unsafe_allow_html=True)
+                clicked = st.button("매매내역 보기", key=f"cardbtn_{idx}", use_container_width=True)
                 if clicked:
                     st.session_state.detail_stock = r["종목명"]
                     st.rerun()
@@ -941,7 +925,9 @@ with tab_tx:
 
     existing_names = sorted(holdings["종목명"].dropna().astype(str).replace("", pd.NA).dropna().unique().tolist())
     name_options = existing_names + ["기타 (직접 입력)"]
-    name_choice = st.selectbox("종목명", name_options, key="tx_name_choice")
+    st.caption("종목명 선택")
+    name_choice = st.radio("종목명", name_options, horizontal=True,
+                            label_visibility="collapsed", key="tx_name_choice")
     if name_choice == "기타 (직접 입력)":
         tx_name_input = st.text_input("새 종목명", placeholder="예: 삼성전자", key="tx_name_custom")
     else:
@@ -952,7 +938,7 @@ with tab_tx:
         with c1:
             tx_date = st.date_input("날짜", value=date.today())
         with c2:
-            tx_kind = st.selectbox("구분", ["매수", "매도"])
+            tx_kind = st.radio("구분", ["매수", "매도"], horizontal=True)
             tx_qty = st.number_input("수량", min_value=0, step=1)
         tx_price = st.number_input("단가", min_value=0, step=100)
         tx_memo = st.text_input("메모 (선택)", placeholder="예: 분할매수 1차")
