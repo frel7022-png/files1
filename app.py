@@ -729,32 +729,29 @@ with tab_port:
             </div>
             """, unsafe_allow_html=True)
 
-            with st.popover("매매내역 보기", use_container_width=True):
-                st.caption(f"{r['종목명']}")
-                stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
-                stock_tx["날짜"] = stock_tx["날짜"].astype(str)
-                stock_tx = stock_tx.sort_values("날짜")
-                if stock_tx.empty:
-                    st.caption("기록된 거래가 없습니다. '거래 기록' 탭에서 추가할 수 있어요.")
-                else:
-                    for _, t in stock_tx.iterrows():
-                        realized = t["실현손익"]
-                        right_html = ""
-                        if t["구분"] == "매도" and str(realized) not in ("", "nan"):
-                            rv = float(realized)
-                            rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
-                            rs2 = "+" if rv >= 0 else ""
-                            right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
-                        memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
-                        st.markdown(f"""
-                        <div class="tx-card">
-                            <div class="tx-left">
-                                <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
-                            </div>
-                            <div class="tx-right">{right_html}</div>
-
+            stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
+            stock_tx["날짜"] = stock_tx["날짜"].astype(str)
+            stock_tx = stock_tx.sort_values("날짜")
+            if stock_tx.empty:
+                pass
+            else:
+                for _, t in stock_tx.iterrows():
+                    realized = t["실현손익"]
+                    right_html = ""
+                    if t["구분"] == "매도" and str(realized) not in ("", "nan"):
+                        rv = float(realized)
+                        rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
+                        rs2 = "+" if rv >= 0 else ""
+                        right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
+                    memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
+                    st.markdown(f"""
+                    <div class="tx-card">
+                        <div class="tx-left">
+                            <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
                         </div>
-                        """, unsafe_allow_html=True)
+                        <div class="tx-right">{right_html}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
     # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
