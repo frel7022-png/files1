@@ -461,7 +461,19 @@ st.markdown(f"""
     svg {{ fill: {T['muted']} !important; }}
 
     /* 라디오/토글: 동그라미 표시를 완전히 숨기고 텍스트 알약(pill)만 남김 */
-    div[data-testid="stToggle"] span {{ background-color: {T['card2']} !important; }}
+    div[data-testid="stToggle"] label,
+    div[data-testid="stToggle"] span,
+    div[data-testid="stToggle"] div,
+    div[data-testid="stToggle"] [role="switch"] {{
+        background-color: {T['card2']} !important;
+        border-color: {T['border']} !important;
+    }}
+    div[data-testid="stToggle"] [role="switch"][aria-checked="true"] {{
+        background-color: {T['muted2']} !important;
+    }}
+    div[data-testid="stToggle"] [role="switch"] > div {{
+        background-color: #fff !important;
+    }}
     div[role="radiogroup"] {{
         flex-wrap: nowrap !important;
         gap: 3px 4px !important;
@@ -531,9 +543,14 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
-col_title, col_theme = st.columns([3, 1])
+col_title, col_label, col_theme = st.columns([3, 0.9, 0.7])
 with col_title:
     st.markdown('<div class="brand">SP Orchestra</div>', unsafe_allow_html=True)
+with col_label:
+    st.markdown(
+        f"<div style='text-align:right;font-size:11px;color:{T['muted']};padding-top:12px;'>화면</div>",
+        unsafe_allow_html=True,
+    )
 with col_theme:
     is_dark = st.session_state["theme"] == "dark"
     new_dark = st.toggle("다크", value=is_dark, key="theme_switch", label_visibility="collapsed")
@@ -705,6 +722,31 @@ with tab_port:
             </div>
             """, unsafe_allow_html=True)
 
+            with st.popover(f"{r['종목명']} 매매내역", use_container_width=True):
+                stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
+                stock_tx["날짜"] = stock_tx["날짜"].astype(str)
+                stock_tx = stock_tx.sort_values("날짜")
+                if stock_tx.empty:
+                    st.caption("기록된 거래가 없습니다. '거래 기록' 탭에서 추가할 수 있어요.")
+                else:
+                    for _, t in stock_tx.iterrows():
+                        realized = t["실현손익"]
+                        right_html = ""
+                        if t["구분"] == "매도" and str(realized) not in ("", "nan"):
+                            rv = float(realized)
+                            rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
+                            rs2 = "+" if rv >= 0 else ""
+                            right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
+                        memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
+                        st.markdown(f"""
+                        <div class="tx-card">
+                            <div class="tx-left">
+                                <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
+                            </div>
+                            <div class="tx-right">{right_html}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
     # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
     with col_r:
@@ -751,6 +793,10 @@ with tab_tx:
     c3 = UP_COLOR if cap_return3 >= 0 else DOWN_COLOR
     s3 = "+" if cap_return3 >= 0 else ""
 
+    total_realized = pd.to_numeric(tx.loc[tx["구분"] == "매도", "실현손익"], errors="coerce").sum()
+    rc = UP_COLOR if total_realized >= 0 else DOWN_COLOR
+    rs = "+" if total_realized >= 0 else ""
+
     st.markdown(f"""
     <div class="summary-box">
         <div class="summary-label">최초 자본 10,000,000원 대비</div>
@@ -758,6 +804,7 @@ with tab_tx:
         <span class="summary-sub" style="color:{c3}">{s3}{cap_return_pct3:.2f}%</span>
         <div class="summary-grid">
             <div>현재 총자산<b>{total_assets3:,.0f}원</b></div>
+            <div>실현손익 누적<b style="color:{rc}">{rs}{total_realized:,.0f}원</b></div>
             <div>미실현 손실<b style="color:{DOWN_COLOR}">-{unreal3:,.0f}원</b></div>
         </div>
     </div>
