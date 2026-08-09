@@ -355,7 +355,6 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
-    .stock-card-attached {{ border-radius:12px; margin-bottom:7px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
     .stock-weight-inline {{ font-size:11px; color:{T['muted']}; margin-left:6px; }}
@@ -363,7 +362,6 @@ st.markdown(f"""
     .stock-grid {{ display:grid; grid-template-columns: 0.7fr 1.05fr 1.05fr 1.3fr; gap:6px; margin-top:7px; }}
     .cell .top {{ font-size:12.5px; font-weight:700; color:{T['text']}; }}
     .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
-    .stock-foot {{ display:flex; justify-content:flex-end; margin-top:6px; font-size:10px; color:{T['muted2']}; }}
 
     .tx-card {{ background:{T['card2']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
@@ -418,6 +416,7 @@ st.markdown(f"""
         background-color: {T['card']} !important;
         border-color: {T['border']} !important;
         border-radius: 12px !important;
+        margin-bottom: 7px !important;
     }}
     [data-testid="stExpander"] summary,
     [data-testid="stExpander"] summary:hover,
@@ -711,23 +710,32 @@ with tab_port:
             csign = "+" if r["등락률"] >= 0 else ""
             sc = sector_color_map.get(r["섹터"], "#6b7280")
             
-            # 여기서부터 종목 박스를 expander로 감쌈
-            with st.expander(f"""
-            <div class="stock-top">
-                <span><span class="stock-name">{r['종목명']}</span>
-                    <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-            </div>
-            <div class="stock-grid">
-                <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                <div class="cell">
-                    <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                    <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
+            # 깔끔하게 expander 타이틀에는 종목명과 핵심 요약만 텍스트로 보여주고, 박스 내부에서 상세 내용을 보여줌
+            expander_title = f"{r['종목명']}  (비중 {r['비중']:.1f}% / 손익 {psign}{r['손익']:,.0f원})"
+            with st.expander(expander_title, expanded=False):
+                # 원래 하얀 박스 내용물 표시
+                st.markdown(f"""
+                <div class="stock-card" style="margin-bottom:10px; border:none; padding:0; background:transparent;">
+                    <div class="stock-top">
+                        <span><span class="stock-name">{r['종목명']}</span>
+                            <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                        <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
+                    </div>
+                    <div class="stock-grid">
+                        <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                        <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                        <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                        <div class="cell">
+                            <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                            <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            """, expanded=False):
+                """, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.caption("매매 내역")
+                
                 stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
                 stock_tx["날짜"] = stock_tx["날짜"].astype(str)
                 stock_tx = stock_tx.sort_values("날짜", ascending=False)
