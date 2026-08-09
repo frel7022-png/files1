@@ -355,13 +355,6 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
-    div[class*="st-key-cardbtn_"] {{ margin-top:-9px; margin-bottom:7px; }}
-    div[class*="st-key-cardbtn_"] > button {{
-        border-radius: 0 0 10px 10px !important;
-        font-size: 11px !important;
-        min-height: 1.8em !important;
-        height: 1.8em !important;
-    }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
     .stock-weight-inline {{ font-size:11px; color:{T['muted']}; margin-left:6px; }}
@@ -677,144 +670,81 @@ with tab_port:
             st.info("종목/예수금 데이터가 있으면 섹터 비중이 표시됩니다.")
 
     # ---- 종목별 보유현황 ----
-    if "detail_stock" not in st.session_state:
-        st.session_state.detail_stock = None
+    SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
+                     "평가금액": "valuation", "손익": "profit"}
+    if "sort_mode" not in st.session_state:
+        st.session_state.sort_mode = "weight"
 
-    if st.session_state.detail_stock:
-        # ---- 상세(매매내역) 화면 ----
-        name = st.session_state.detail_stock
-        if st.button("← 목록으로", key="back_to_list"):
-            st.session_state.detail_stock = None
-            st.rerun()
-        st.markdown(f"##### {name} 매매내역")
+    last_updated = ""
+    updated_vals = [v for v in df["업데이트시각"].tolist() if v]
+    if updated_vals:
+        last_updated = max(updated_vals)
 
-        cur = df[df["종목명"] == name]
-        if not cur.empty:
-            cr = cur.iloc[0]
-            pc0 = UP_COLOR if cr["손익"] >= 0 else DOWN_COLOR
-            ps0 = "+" if cr["손익"] >= 0 else ""
+    col_title2, col_updated = st.columns([2, 1.3])
+    with col_title2:
+        st.markdown("##### 종목별 보유현황")
+    with col_updated:
+        st.markdown(
+            f"<div style='text-align:right;font-size:11px;color:{T['muted2']};padding-top:10px;'>{last_updated}</div>",
+            unsafe_allow_html=True,
+        )
+
+    labels = list(SORT_OPTIONS.keys())
+    cur_label = next(k for k, v in SORT_OPTIONS.items() if v == st.session_state.sort_mode)
+    chosen = st.radio("정렬 기준", labels, index=labels.index(cur_label),
+                       horizontal=True, label_visibility="collapsed", key="sort_radio")
+    st.session_state.sort_mode = SORT_OPTIONS[chosen]
+
+    sector_color_map = {}
+    for i, s in enumerate(df.sort_values("평가금액", ascending=False)["섹터"].unique()):
+        sector_color_map[s] = SECTOR_PALETTE[i % len(SECTOR_PALETTE)]
+
+    mode = st.session_state.sort_mode
+    if mode == "sector":
+        sector_totals = df.groupby("섹터")["평가금액"].sum().sort_values(ascending=False)
+        sector_order = {s: i for i, s in enumerate(sector_totals.index)}
+        df_sorted = df.copy()
+        df_sorted["_rank"] = df_sorted["섹터"].map(sector_order)
+        df_sorted = df_sorted.sort_values(["_rank", "평가금액"], ascending=[True, False])
+    elif mode == "price":
+        df_sorted = df.sort_values("현재가", ascending=False)
+    elif mode == "valuation":
+        df_sorted = df.sort_values("평가금액", ascending=False)
+    elif mode == "profit":
+        df_sorted = df.sort_values("손익", ascending=False)
+    else:
+        df_sorted = df.sort_values("비중", ascending=False)
+
+    rows = df_sorted.to_dict("records")
+
+    if not rows:
+        st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
+    else:
+        for r in rows:
+            pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
+            psign = "+" if r["손익"] >= 0 else ""
+            cc = UP_COLOR if r["등락률"] >= 0 else DOWN_COLOR
+            csign = "+" if r["등락률"] >= 0 else ""
+            sc = sector_color_map.get(r["섹터"], "#6b7280")
+
             st.markdown(f"""
             <div class="stock-card">
                 <div class="stock-top">
-                    <span class="stock-name">{name}</span>
-                    <span class="sector-tag" style="background:#6b728022;color:#6b7280">{cr['섹터']}</span>
+                    <span><span class="stock-name">{r['종목명']}</span>
+                        <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                    <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
                 </div>
                 <div class="stock-grid">
-                    <div class="cell"><div class="top">{cr['수량']:.0f}주</div></div>
-                    <div class="cell"><div class="top">{cr['현재가']:,.0f}</div><div class="bottom">{cr['평단가']:,.0f}</div></div>
-                    <div class="cell"><div class="top">{cr['평가금액']:,.0f}</div><div class="bottom">{cr['매입금액']:,.0f}</div></div>
-                    <div class="cell"><div class="top" style="color:{pc0}">{ps0}{cr['손익']:,.0f}</div>
-                        <div class="bottom" style="color:{pc0}">{ps0}{cr['손익률']:.1f}%</div></div>
+                    <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                    <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                    <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                    <div class="cell">
+                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                        <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
-        stock_tx = tx[tx["종목명"] == name].copy()
-        stock_tx["날짜"] = stock_tx["날짜"].astype(str)
-        stock_tx = stock_tx.sort_values("날짜")
-        if stock_tx.empty:
-            st.info("기록된 거래가 없습니다. '거래 기록' 탭에서 추가할 수 있어요.")
-        else:
-            for _, t in stock_tx.iterrows():
-                realized = t["실현손익"]
-                right_html = ""
-                if t["구분"] == "매도" and str(realized) not in ("", "nan"):
-                    rv = float(realized)
-                    rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
-                    rs2 = "+" if rv >= 0 else ""
-                    right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
-                memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
-                st.markdown(f"""
-                <div class="tx-card">
-                    <div class="tx-left">
-                        <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
-                    </div>
-                    <div class="tx-right">{right_html}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-    else:
-        # ---- 목록 화면 ----
-        SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
-                         "평가금액": "valuation", "손익": "profit"}
-        if "sort_mode" not in st.session_state:
-            st.session_state.sort_mode = "weight"
-
-        last_updated = ""
-        updated_vals = [v for v in df["업데이트시각"].tolist() if v]
-        if updated_vals:
-            last_updated = max(updated_vals)
-
-        col_title2, col_updated = st.columns([2, 1.3])
-        with col_title2:
-            st.markdown("##### 종목별 보유현황")
-        with col_updated:
-            st.markdown(
-                f"<div style='text-align:right;font-size:11px;color:{T['muted2']};padding-top:10px;'>{last_updated}</div>",
-                unsafe_allow_html=True,
-            )
-        st.caption("종목 박스를 누르면 매매내역으로 이동합니다.")
-
-        labels = list(SORT_OPTIONS.keys())
-        cur_label = next(k for k, v in SORT_OPTIONS.items() if v == st.session_state.sort_mode)
-        chosen = st.radio("정렬 기준", labels, index=labels.index(cur_label),
-                           horizontal=True, label_visibility="collapsed", key="sort_radio")
-        st.session_state.sort_mode = SORT_OPTIONS[chosen]
-
-        sector_color_map = {}
-        for i, s in enumerate(df.sort_values("평가금액", ascending=False)["섹터"].unique()):
-            sector_color_map[s] = SECTOR_PALETTE[i % len(SECTOR_PALETTE)]
-
-        mode = st.session_state.sort_mode
-        if mode == "sector":
-            sector_totals = df.groupby("섹터")["평가금액"].sum().sort_values(ascending=False)
-            sector_order = {s: i for i, s in enumerate(sector_totals.index)}
-            df_sorted = df.copy()
-            df_sorted["_rank"] = df_sorted["섹터"].map(sector_order)
-            df_sorted = df_sorted.sort_values(["_rank", "평가금액"], ascending=[True, False])
-        elif mode == "price":
-            df_sorted = df.sort_values("현재가", ascending=False)
-        elif mode == "valuation":
-            df_sorted = df.sort_values("평가금액", ascending=False)
-        elif mode == "profit":
-            df_sorted = df.sort_values("손익", ascending=False)
-        else:
-            df_sorted = df.sort_values("비중", ascending=False)
-
-        rows = df_sorted.to_dict("records")
-
-        if not rows:
-            st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
-        else:
-            for idx, r in enumerate(rows):
-                pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
-                psign = "+" if r["손익"] >= 0 else ""
-                cc = UP_COLOR if r["등락률"] >= 0 else DOWN_COLOR
-                csign = "+" if r["등락률"] >= 0 else ""
-                sc = sector_color_map.get(r["섹터"], "#6b7280")
-
-                st.markdown(f"""
-                <div class="stock-card">
-                    <div class="stock-top">
-                        <span><span class="stock-name">{r['종목명']}</span>
-                            <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                        <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-                    </div>
-                    <div class="stock-grid">
-                        <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                        <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                        <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                        <div class="cell">
-                            <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                            <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                clicked = st.button("매매내역 보기", key=f"cardbtn_{idx}", use_container_width=True)
-                if clicked:
-                    st.session_state.detail_stock = r["종목명"]
-                    st.rerun()
 
     # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
@@ -925,9 +855,16 @@ with tab_tx:
 
     existing_names = sorted(holdings["종목명"].dropna().astype(str).replace("", pd.NA).dropna().unique().tolist())
     name_options = existing_names + ["기타 (직접 입력)"]
-    st.caption("종목명 선택")
-    name_choice = st.radio("종목명", name_options, horizontal=True,
-                            label_visibility="collapsed", key="tx_name_choice")
+
+    if "tx_selected_name" not in st.session_state or st.session_state.tx_selected_name not in name_options:
+        st.session_state.tx_selected_name = name_options[0] if name_options else ""
+
+    with st.popover(f"종목명: {st.session_state.tx_selected_name or '선택'}", use_container_width=True):
+        st.caption("보유 종목 중에서 선택하거나, 맨 아래 '기타'를 골라 새 종목명을 입력하세요.")
+        picked = st.radio("종목 목록", name_options, label_visibility="collapsed", key="tx_name_radio_inner")
+        st.session_state.tx_selected_name = picked
+
+    name_choice = st.session_state.tx_selected_name
     if name_choice == "기타 (직접 입력)":
         tx_name_input = st.text_input("새 종목명", placeholder="예: 삼성전자", key="tx_name_custom")
     else:
