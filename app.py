@@ -355,7 +355,7 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
-    .stock-card-attached {{ border-radius:12px 12px 0 0; margin-bottom:0; border-bottom:none; }}
+    .stock-card-attached {{ border-radius:12px; margin-bottom:7px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
     .stock-weight-inline {{ font-size:11px; color:{T['muted']}; margin-left:6px; }}
@@ -365,7 +365,7 @@ st.markdown(f"""
     .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
     .stock-foot {{ display:flex; justify-content:flex-end; margin-top:6px; font-size:10px; color:{T['muted2']}; }}
 
-    .tx-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
+    .tx-card {{ background:{T['card2']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
     .tx-left .name {{ font-weight:700; color:{T['text']}; }}
     .tx-left .meta {{ color:{T['muted']}; font-size:11.5px; }}
@@ -710,48 +710,47 @@ with tab_port:
             cc = UP_COLOR if r["등락률"] >= 0 else DOWN_COLOR
             csign = "+" if r["등락률"] >= 0 else ""
             sc = sector_color_map.get(r["섹터"], "#6b7280")
-            st.markdown(f"""
-            <div class="stock-card stock-card-attached">
-                <div class="stock-top">
-                    <span><span class="stock-name">{r['종목명']}</span>
-                        <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                    <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-                </div>
-                <div class="stock-grid">
-                    <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                    <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                    <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                    <div class="cell">
-                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                        <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
-                    </div>
+            
+            # 여기서부터 종목 박스를 expander로 감쌈
+            with st.expander(f"""
+            <div class="stock-top">
+                <span><span class="stock-name">{r['종목명']}</span>
+                    <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
+            </div>
+            <div class="stock-grid">
+                <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                <div class="cell">
+                    <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                    <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
-
-            stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
-            stock_tx["날짜"] = stock_tx["날짜"].astype(str)
-            stock_tx = stock_tx.sort_values("날짜")
-            if stock_tx.empty:
-                pass
-            else:
-                for _, t in stock_tx.iterrows():
-                    realized = t["실현손익"]
-                    right_html = ""
-                    if t["구분"] == "매도" and str(realized) not in ("", "nan"):
-                        rv = float(realized)
-                        rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
-                        rs2 = "+" if rv >= 0 else ""
-                        right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
-                    memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
-                    st.markdown(f"""
-                    <div class="tx-card">
-                        <div class="tx-left">
-                            <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
+            """, expanded=False):
+                stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
+                stock_tx["날짜"] = stock_tx["날짜"].astype(str)
+                stock_tx = stock_tx.sort_values("날짜", ascending=False)
+                if stock_tx.empty:
+                    st.caption("기록된 거래가 없습니다.")
+                else:
+                    for _, t in stock_tx.iterrows():
+                        realized = t["실현손익"]
+                        right_html = ""
+                        if t["구분"] == "매도" and str(realized) not in ("", "nan"):
+                            rv = float(realized)
+                            rc2 = UP_COLOR if rv >= 0 else DOWN_COLOR
+                            rs2 = "+" if rv >= 0 else ""
+                            right_html = f'<span style="color:{rc2}">{rs2}{rv:,.0f}원</span>'
+                        memo_html = f' · {t["메모"]}' if str(t["메모"]) not in ("", "nan") else ""
+                        st.markdown(f"""
+                        <div class="tx-card">
+                            <div class="tx-left">
+                                <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
+                            </div>
+                            <div class="tx-right">{right_html}</div>
                         </div>
-                        <div class="tx-right">{right_html}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
     # ---- 새로고침 / 종목 편집 ----
     col_r, col_e = st.columns([1, 1])
