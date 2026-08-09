@@ -329,10 +329,11 @@ st.markdown(f"""
     .brand {{
         font-family: 'Sora', sans-serif;
         font-weight: 800;
-        font-size: 23px;
-        letter-spacing: 0.02em;
+        font-size: 18px;
+        letter-spacing: 0.01em;
         color: {T['text']};
-        padding: 4px 0;
+        padding: 6px 0;
+        white-space: nowrap;
     }}
     .block-container {{ padding-top: 1.1rem; padding-bottom: 2rem; padding-left: 1rem; padding-right: 1rem; max-width: 480px; }}
     #MainMenu, footer, header {{ visibility: hidden; }}
@@ -354,6 +355,7 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
+    .stock-card-attached {{ border-radius:12px 12px 0 0; margin-bottom:0; border-bottom:none; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
     .stock-name {{ font-size:15px; font-weight:700; color:{T['text']}; }}
     .stock-weight-inline {{ font-size:11px; color:{T['muted']}; margin-left:6px; }}
@@ -408,9 +410,13 @@ st.markdown(f"""
         box-shadow: none !important;
     }}
 
-    [data-testid="stExpander"] {{
+    [data-testid="stExpander"],
+    [data-testid="stExpander"] > details,
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary > div,
+    [data-testid="stExpander"] div[data-testid="stExpanderDetails"] {{
         background-color: {T['card']} !important;
-        border: 1px solid {T['border']} !important;
+        border-color: {T['border']} !important;
         border-radius: 12px !important;
     }}
     [data-testid="stExpander"] summary,
@@ -419,6 +425,7 @@ st.markdown(f"""
     [data-testid="stExpander"] svg {{
         color: {T['text']} !important;
         fill: {T['text']} !important;
+        background-color: {T['card']} !important;
     }}
 
     div[data-testid="stTextInput"] div,
@@ -543,7 +550,7 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
-col_title, col_label, col_theme = st.columns([3, 0.9, 0.7])
+col_title, col_label, col_theme = st.columns([2.2, 1, 0.9])
 with col_title:
     st.markdown('<div class="brand">SP Orchestra</div>', unsafe_allow_html=True)
 with col_label:
@@ -704,7 +711,7 @@ with tab_port:
             csign = "+" if r["등락률"] >= 0 else ""
             sc = sector_color_map.get(r["섹터"], "#6b7280")
             st.markdown(f"""
-            <div class="stock-card">
+            <div class="stock-card stock-card-attached">
                 <div class="stock-top">
                     <span><span class="stock-name">{r['종목명']}</span>
                         <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
@@ -722,7 +729,8 @@ with tab_port:
             </div>
             """, unsafe_allow_html=True)
 
-            with st.popover(f"{r['종목명']} 매매내역", use_container_width=True):
+            with st.popover("매매내역 보기", use_container_width=True):
+                st.caption(f"{r['종목명']}")
                 stock_tx = tx[tx["종목명"] == r["종목명"]].copy()
                 stock_tx["날짜"] = stock_tx["날짜"].astype(str)
                 stock_tx = stock_tx.sort_values("날짜")
@@ -744,6 +752,7 @@ with tab_port:
                                 <span class="meta">{t['날짜']} · {t['구분']} {float(t['수량']):.0f}주 @ {float(t['단가']):,.0f}원{memo_html}</span>
                             </div>
                             <div class="tx-right">{right_html}</div>
+
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -853,11 +862,19 @@ with tab_tx:
 
     # ---- 새 거래 기록 ----
     st.markdown("##### 새 거래 기록하기")
+
+    existing_names = sorted(holdings["종목명"].dropna().astype(str).replace("", pd.NA).dropna().unique().tolist())
+    name_options = existing_names + ["기타 (직접 입력)"]
+    name_choice = st.selectbox("종목명", name_options, key="tx_name_choice")
+    if name_choice == "기타 (직접 입력)":
+        tx_name_input = st.text_input("새 종목명", placeholder="예: 삼성전자", key="tx_name_custom")
+    else:
+        tx_name_input = name_choice
+
     with st.form("tx_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             tx_date = st.date_input("날짜", value=date.today())
-            tx_name = st.text_input("종목명", placeholder="예: 삼성전자")
         with c2:
             tx_kind = st.selectbox("구분", ["매수", "매도"])
             tx_qty = st.number_input("수량", min_value=0, step=1)
@@ -866,6 +883,7 @@ with tab_tx:
         submitted = st.form_submit_button("기록 저장", use_container_width=True)
 
     if submitted:
+        tx_name = (tx_name_input or "").strip()
         if not tx_name or tx_qty <= 0 or tx_price <= 0:
             st.error("종목명, 수량, 단가를 정확히 입력해주세요.")
         else:
