@@ -433,24 +433,15 @@ st.markdown(f"""
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
     .sector-bar-list {{ margin-top:10px; }}
-    .sector-scale-row {{ display:flex; align-items:center; gap:6px; margin-bottom:4px; }}
-    .sector-scale-spacer {{ width:64px; flex-shrink:0; }}
-    .sector-scale-track {{ position:relative; flex:1; height:12px; }}
-    .sector-scale-track span {{ position:absolute; transform:translateX(-50%); font-size:9.5px; color:{T['muted2']}; }}
-    .sector-scale-track span:first-child {{ transform:none; }}
-    .sector-scale-track span:last-child {{ transform:translateX(-100%); }}
-    .sector-scale-pctcol {{ width:108px; flex-shrink:0; }}
-    .sector-bar-row {{ display:flex; align-items:center; gap:6px; margin-bottom:3px; }}
+    .sector-bar-row {{ display:flex; align-items:center; gap:6px; margin-bottom:14px; }}
     .sector-bar-label {{ font-size:11px; font-weight:600; color:{T['text']}; width:64px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-    .sector-bar-track {{ position:relative; flex:1; height:8px; background:{T['card2']}; border-radius:4px; overflow:visible; }}
-    .sector-bar-fill {{ position:absolute; left:0; top:0; height:100%; border-radius:4px;
-        background-image: repeating-linear-gradient(to right, var(--sbcolor) 0px, var(--sbcolor) 4px, transparent 4px, transparent 7px); }}
+    .sector-bar-track {{ position:relative; flex:1; height:14px; background:{T['card']}; border:1px solid {T['border']}; border-radius:999px; overflow:visible; }}
+    .sector-bar-fill {{ position:absolute; left:1px; top:1px; bottom:1px; border-radius:999px; }}
     .sector-target-marker {{ position:absolute; top:-2px; bottom:-2px; width:2px; background:{T['text']}; opacity:0.55; }}
-    .sector-bar-pct {{ font-size:11px; color:{T['muted']}; width:108px; flex-shrink:0; text-align:right; font-family: ui-monospace, monospace; white-space:nowrap; }}
+    .sector-target-label {{ position:absolute; top:100%; margin-top:2px; transform:translateX(-50%); font-size:9.5px; color:{T['muted2']}; white-space:nowrap; }}
+    .sector-bar-pct {{ font-size:12px; color:{T['muted']}; width:64px; flex-shrink:0; text-align:right; font-family: ui-monospace, monospace; white-space:nowrap; }}
     .sector-bar-pct .cur {{ font-weight:700; color:{T['text']}; }}
     .sector-bar-pct .delta {{ margin-left:3px; }}
-    .sector-bar-pct .target {{ margin-left:4px; color:{T['muted2']}; }}
-    .sector-hist-note {{ font-size:10.5px; color:{T['muted2']}; margin-top:3px; }}
 
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
@@ -794,8 +785,6 @@ with tab_port:
 
         # ---- 섹터별 현재 비중 막대 (주식 총자산 대비, 예수금 제외) + 목표 비중 ----
         if stock_weight_rank:
-            st.markdown("##### 섹터별 비중")
-
             sec_hist = load_sector_history()
             prev_weights = {}
             if not sec_hist.empty:
@@ -810,25 +799,16 @@ with tab_port:
 
             SCALE_MAX = 40.0  # 종목 특성상 한 섹터가 40%를 넘지 않는다는 전제의 고정 스케일(배터리 게이지 방식)
 
-            # 0~40% 눈금 (막대 열 폭에 맞춰 정렬)
-            ticks_html = "".join(f'<span style="left:{t/SCALE_MAX*100:.1f}%">{t:.0f}%</span>' for t in (0, 10, 20, 30, 40))
-            st.markdown(
-                f'<div class="sector-scale-row"><div class="sector-scale-spacer"></div>'
-                f'<div class="sector-scale-track">{ticks_html}</div>'
-                f'<div class="sector-scale-pctcol"></div></div>',
-                unsafe_allow_html=True,
-            )
-
             for name, pct in stock_weight_rank:
                 color = color_map.get(name, "#888")
                 width_pct = max(min(pct / SCALE_MAX * 100, 100), 0)
                 target = SECTOR_TARGETS.get(name)
                 target_marker = ""
-                target_label = ""
+                target_sublabel = ""
                 if target is not None:
                     target_pos = max(min(target / SCALE_MAX * 100, 100), 0)
                     target_marker = f'<div class="sector-target-marker" style="left:{target_pos}%"></div>'
-                    target_label = f'<span class="target">| {target:.0f}%</span>'
+                    target_sublabel = f'<div class="sector-target-label" style="left:{target_pos}%">{target:.0f}%</div>'
                 delta_html = ""
                 if name in prev_weights:
                     delta = pct - prev_weights[name]
@@ -838,7 +818,7 @@ with tab_port:
                         delta_html = f'<span class="delta" style="color:{dcolor}">{dsign}{delta:.1f}%p</span>'
 
                 is_open = st.session_state.sector_trend_pick == name
-                c1, c2, c3 = st.columns([1.05, 3.1, 1.75])
+                c1, c2, c3 = st.columns([1.05, 3.1, 1.4])
                 with c1:
                     label = f"▾ {name}" if is_open else name
                     if st.button(label, key=f"sector_pick_{name}", use_container_width=True):
@@ -847,13 +827,13 @@ with tab_port:
                 with c2:
                     st.markdown(
                         f'<div class="sector-bar-track">'
-                        f'<div class="sector-bar-fill" style="--sbcolor:{color}; width:{width_pct}%"></div>'
-                        f'{target_marker}</div>',
+                        f'<div class="sector-bar-fill" style="background:{color}; width:{width_pct}%"></div>'
+                        f'{target_marker}{target_sublabel}</div>',
                         unsafe_allow_html=True,
                     )
                 with c3:
                     st.markdown(
-                        f'<div class="sector-bar-pct"><span class="cur">{pct:.1f}%</span>{delta_html}{target_label}</div>',
+                        f'<div class="sector-bar-pct"><span class="cur">{pct:.1f}%</span>{delta_html}</div>',
                         unsafe_allow_html=True,
                     )
 
@@ -869,6 +849,9 @@ with tab_port:
                         x2 = list(range(len(dates)))
                         ax2.plot(x2, vals, color=color, linewidth=2.0, marker="o", markersize=3)
                         ax2.plot([x2[-1]], [vals[-1]], marker="o", markersize=7, color=color)
+                        for xi, yi in zip(x2, vals):
+                            ax2.annotate(f"{yi:.1f}%", (xi, yi), textcoords="offset points", xytext=(0, 7),
+                                         ha="center", fontsize=8, color=T["text"])
                         if target is not None:
                             ax2.axhline(target, color=T["muted2"], linewidth=1, linestyle="--")
                         ax2.set_ylim(0, 40)
@@ -880,15 +863,8 @@ with tab_port:
                         ax2.grid(axis="y", color=T["border"], linewidth=0.6)
                         st.pyplot(fig2, use_container_width=True)
                         plt.close(fig2)
-                        st.markdown(
-                            '<div class="sector-hist-note">y축 0~40% · 시세 새로고침/거래 기록 시 오늘자 비중이 저장됩니다.'
-                            + (' 점선은 목표 비중.' if target is not None else '') + '</div>',
-                            unsafe_allow_html=True,
-                        )
                     else:
                         st.info("시세 새로고침 또는 거래 기록을 하면 그날의 섹터 비중이 저장되어 추이가 쌓입니다.")
-
-            st.caption("점선 막대 색은 도넛 색상과 동일 · | 는 목표 비중 · 섹터명을 누르면 추이 그래프가 열리고, 다시 누르면 닫힙니다.")
 
     # ---- 종목별 보유현황 ----
     SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
