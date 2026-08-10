@@ -24,6 +24,7 @@ HOLDINGS_FILE = HERE / "portfolio_data.csv"
 TX_FILE = HERE / "transactions.csv"
 STATE_FILE = HERE / "account_state.csv"
 HISTORY_FILE = HERE / "asset_history.csv"
+SECTOR_HISTORY_FILE = HERE / "sector_history.csv"
 
 HOLD_COLUMNS = ["종목명", "종목코드", "섹터", "수량", "평단가", "현재가", "등락률", "업데이트시각"]
 TX_COLUMNS = ["id", "날짜", "종목명", "구분", "수량", "단가", "실현손익", "메모", "정산반영"]
@@ -37,6 +38,39 @@ SECTOR_PALETTE = [
     "#2DD4BF", "#F5A623", "#A78BFA", "#34D399", "#F472B6",
     "#FBBF24", "#60A5FA", "#F87171", "#C084FC", "#38BDF8", "#FB923C",
 ]
+
+# 섹터 비중 보기 전용 그룹 매핑 (종목별 보유현황의 세부 섹터는 그대로 유지됨)
+SECTOR_GROUP_MAP = {
+    "유통": "유통 물류",
+    "물류": "유통 물류",
+    "반도체소재": "반도체",
+    "반도체장비": "반도체",
+    "인터넷": "반도체",
+    "건자재": "건설",
+    "건설": "건설",
+    "제지": "소비재",
+    "섬유의류": "소비재",
+    "화장품": "소비재",
+    "제약바이오": "의료바이오",
+    "제약바이어": "의료바이오",  # 오타 대비
+    "의료기기": "의료바이오",
+    "해운": "해운",
+    "조선": "해운",
+    "엔터테인먼트": "엔터",
+    "게임": "엔터",
+    "렌탈서비스": "서비스",
+}
+
+# 섹터별 목표 비중(주식 총자산 대비, %). 아직 정하지 않은 섹터는 포함하지 않음 — 추후 추가.
+SECTOR_TARGETS = {
+    "식품": 30.0,
+    "소비재": 20.0,
+}
+
+
+def group_sector(sector: str) -> str:
+    """섹터 비중 보기용 그룹명 반환. 매핑에 없으면 원래 섹터명 그대로."""
+    return SECTOR_GROUP_MAP.get(sector, sector)
 
 THEMES = {
     "dark": {
@@ -141,6 +175,29 @@ def snapshot_history(total_assets: float, adjusted_assets: float) -> None:
     hist = pd.concat([hist, pd.DataFrame([{"날짜": d, "총자산": total_assets, "조정자산": adjusted_assets}])])
     hist = hist.sort_values("날짜")
     save_history(hist)
+
+
+def load_sector_history() -> pd.DataFrame:
+    if SECTOR_HISTORY_FILE.exists():
+        return pd.read_csv(SECTOR_HISTORY_FILE)
+    return pd.DataFrame(columns=["날짜", "섹터그룹", "비중"])
+
+
+def save_sector_history(df: pd.DataFrame) -> None:
+    df.to_csv(SECTOR_HISTORY_FILE, index=False)
+
+
+def snapshot_sector_history(weights: dict) -> None:
+    """섹터그룹별 오늘자 비중(주식 총자산 대비 %) 스냅샷 저장. 같은 날짜 데이터는 덮어씀."""
+    if not weights:
+        return
+    hist = load_sector_history()
+    d = today_kst_str()
+    hist = hist[hist["날짜"] != d]
+    new_rows = pd.DataFrame([{"날짜": d, "섹터그룹": k, "비중": v} for k, v in weights.items()])
+    hist = pd.concat([hist, new_rows], ignore_index=True)
+    hist = hist.sort_values(["날짜", "섹터그룹"])
+    save_sector_history(hist)
 
 
 # ------------------------------------------------------------------ #
@@ -267,6 +324,19 @@ def compute_metrics(df: pd.DataFrame, cash: float):
     return df, stock_valuation, total_assets, unrealized_loss
 
 
+def compute_sector_weights(df: pd.DataFrame) -> dict:
+    """섹터그룹별 비중(%). 주식 평가금액 총합 대비이며 예수금은 포함하지 않음."""
+    if df.empty:
+        return {}
+    d = df.copy()
+    d["섹터그룹"] = d["섹터"].apply(group_sector)
+    stock_total = d["평가금액"].sum()
+    if stock_total <= 0:
+        return {}
+    grp = d.groupby("섹터그룹")["평가금액"].sum()
+    return (grp / stock_total * 100).to_dict()
+
+
 # ------------------------------------------------------------------ #
 # 거래 반영 (매수/매도)
 # ------------------------------------------------------------------ #
@@ -361,6 +431,19 @@ st.markdown(f"""
     .legend-item {{ display:flex; align-items:center; gap:5px; font-size:12px; color:{T['text']}; }}
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
+
+    .sector-bar-list {{ margin-top:16px; }}
+    .sector-bar-row {{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }}
+    .sector-bar-label {{ font-size:12.5px; font-weight:600; color:{T['text']}; width:78px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .sector-bar-track {{ position:relative; flex:1; height:10px; background:{T['card2']}; border-radius:5px; overflow:visible; }}
+    .sector-bar-fill {{ position:absolute; left:0; top:0; height:100%; border-radius:5px;
+        background-image: repeating-linear-gradient(to right, var(--sbcolor) 0px, var(--sbcolor) 5px, transparent 5px, transparent 8px); }}
+    .sector-target-marker {{ position:absolute; top:-3px; bottom:-3px; width:2px; background:{T['text']}; opacity:0.55; }}
+    .sector-bar-pct {{ font-size:12px; color:{T['muted']}; width:132px; flex-shrink:0; text-align:right; font-family: ui-monospace, monospace; white-space:nowrap; }}
+    .sector-bar-pct .cur {{ font-weight:700; color:{T['text']}; }}
+    .sector-bar-pct .delta {{ margin-left:4px; }}
+    .sector-bar-pct .target {{ margin-left:6px; color:{T['muted2']}; }}
+    .sector-hist-note {{ font-size:11.5px; color:{T['muted2']}; margin-top:4px; }}
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
@@ -659,12 +742,19 @@ with tab_port:
     </div>
     """, unsafe_allow_html=True)
 
-    # ---- 섹터 비중 도넛 ----
+    # ---- 섹터 비중 도넛 + 목표 비중 관리 ----
     with st.expander("섹터 비중 보기", expanded=False):
         include_cash = st.toggle("예수금 포함", value=st.session_state.get("include_cash", True), key="cash_toggle")
         st.session_state["include_cash"] = include_cash
 
-        sector_val = df.groupby("섹터")["평가금액"].sum().to_dict()
+        # 도넛/막대 공통 색상: 주식(예수금 제외) 비중 기준으로 순위를 매겨 고정 배정
+        stock_weights = compute_sector_weights(df)  # {섹터그룹: 주식 총자산 대비 %}
+        stock_weight_rank = sorted(stock_weights.items(), key=lambda x: x[1], reverse=True)
+        color_map = {name: SECTOR_PALETTE[i % len(SECTOR_PALETTE)] for i, (name, _) in enumerate(stock_weight_rank)}
+
+        df_grp = df.copy()
+        df_grp["섹터그룹"] = df_grp["섹터"].apply(group_sector)
+        sector_val = df_grp.groupby("섹터그룹")["평가금액"].sum().to_dict()
         if include_cash and state["cash"] > 0:
             sector_val[CASH_LABEL] = state["cash"]
         sector_items = sorted(sector_val.items(), key=lambda x: x[1], reverse=True)
@@ -673,10 +763,7 @@ with tab_port:
         if denom > 0 and sector_items:
             labels = [s for s, _ in sector_items]
             values = [v for _, v in sector_items]
-            colors = [SECTOR_PALETTE[i % len(SECTOR_PALETTE)] for i in range(len(labels))]
-            cash_idx = labels.index(CASH_LABEL) if CASH_LABEL in labels else None
-            if cash_idx is not None:
-                colors[cash_idx] = T["cash_dot"]
+            colors = [color_map.get(lbl, T["cash_dot"] if lbl == CASH_LABEL else T["muted2"]) for lbl in labels]
 
             fig, ax = plt.subplots(figsize=(4.6, 4.6))
             fig.patch.set_alpha(0)
@@ -696,6 +783,100 @@ with tab_port:
             st.markdown(legend_html, unsafe_allow_html=True)
         else:
             st.info("종목/예수금 데이터가 있으면 섹터 비중이 표시됩니다.")
+
+        # ---- 섹터별 현재 비중 막대 (주식 총자산 대비, 예수금 제외) + 목표 비중 ----
+        if stock_weight_rank:
+            st.markdown("##### 섹터별 비중 (주식 자산 기준 · 목표 대비)")
+
+            sec_hist = load_sector_history()
+            prev_weights = {}
+            if not sec_hist.empty:
+                today_str_ = today_kst_str()
+                past_dates = sorted(d for d in sec_hist["날짜"].unique() if d < today_str_)
+                if past_dates:
+                    prev_date = past_dates[-1]
+                    prev_weights = sec_hist[sec_hist["날짜"] == prev_date].set_index("섹터그룹")["비중"].to_dict()
+
+            if "sector_trend_pick" not in st.session_state or st.session_state.sector_trend_pick not in stock_weights:
+                st.session_state.sector_trend_pick = stock_weight_rank[0][0]
+
+            scale_max = max([v for _, v in stock_weight_rank] + list(SECTOR_TARGETS.values()) + [10]) * 1.15
+
+            for name, pct in stock_weight_rank:
+                color = color_map.get(name, "#888")
+                width_pct = max(min(pct / scale_max * 100, 100), 0)
+                target = SECTOR_TARGETS.get(name)
+                target_marker = ""
+                target_label = ""
+                if target is not None:
+                    target_pos = max(min(target / scale_max * 100, 100), 0)
+                    target_marker = f'<div class="sector-target-marker" style="left:{target_pos}%"></div>'
+                    target_label = f'<span class="target">| {target:.0f}%</span>'
+                delta_html = ""
+                if name in prev_weights:
+                    delta = pct - prev_weights[name]
+                    if abs(delta) >= 0.05:
+                        dcolor = UP_COLOR if delta > 0 else DOWN_COLOR
+                        dsign = "+" if delta > 0 else ""
+                        delta_html = f'<span class="delta" style="color:{dcolor}">{dsign}{delta:.1f}%p</span>'
+
+                c1, c2, c3 = st.columns([1.15, 3.1, 1.85])
+                with c1:
+                    label = f"▶ {name}" if st.session_state.sector_trend_pick == name else name
+                    if st.button(label, key=f"sector_pick_{name}", use_container_width=True):
+                        st.session_state.sector_trend_pick = name
+                        st.rerun()
+                with c2:
+                    st.markdown(
+                        f'<div class="sector-bar-track">'
+                        f'<div class="sector-bar-fill" style="--sbcolor:{color}; width:{width_pct}%"></div>'
+                        f'{target_marker}</div>',
+                        unsafe_allow_html=True,
+                    )
+                with c3:
+                    st.markdown(
+                        f'<div class="sector-bar-pct"><span class="cur">{pct:.1f}%</span>{delta_html}{target_label}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            st.caption("점선 막대 색은 도넛 색상과 동일 · | 는 목표 비중 · 종목명을 누르면 아래에 해당 섹터의 추이가 표시됩니다.")
+
+            # ---- 선택한 섹터의 날짜별 추이 ----
+            picked = st.session_state.sector_trend_pick
+            st.markdown(f"**{picked} 비중 추이**")
+
+            if not sec_hist.empty and picked in sec_hist["섹터그룹"].unique():
+                series = sec_hist[sec_hist["섹터그룹"] == picked].sort_values("날짜")
+                dates = series["날짜"].tolist()
+                vals = series["비중"].tolist()
+                baseline = vals[0]
+                rel = [v - baseline for v in vals]
+
+                fig2, ax2 = plt.subplots(figsize=(4.6, 2.6))
+                fig2.patch.set_alpha(0)
+                ax2.set_facecolor("none")
+                x2 = list(range(len(dates)))
+                line_color = color_map.get(picked, UP_COLOR)
+                ax2.plot(x2, rel, color=line_color, linewidth=2.0, marker="o", markersize=3)
+                ax2.plot([x2[-1]], [rel[-1]], marker="o", markersize=7, color=line_color)
+                ax2.axhline(0, color=T["muted2"], linewidth=1, linestyle="--")
+                ax2.set_ylim(-15, 15)
+                ax2.set_xticks(x2)
+                ax2.set_xticklabels([d[5:] for d in dates], fontsize=8, color=T["muted"])
+                ax2.tick_params(axis="y", labelsize=8, colors=T["muted"])
+                for spine in ax2.spines.values():
+                    spine.set_visible(False)
+                ax2.grid(axis="y", color=T["border"], linewidth=0.6)
+                st.pyplot(fig2, use_container_width=True)
+                plt.close(fig2)
+                st.markdown(
+                    '<div class="sector-hist-note">y=0%는 추적 시작일(첫 기록일) 기준이며, '
+                    '이후 비중 변화(%p)를 누적해서 보여줍니다. y축 범위는 -15%~15%로 시작(추후 조정 가능) · '
+                    '시세 새로고침 또는 거래 기록을 할 때마다 오늘자 스냅샷이 갱신됩니다.</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("시세 새로고침 또는 거래 기록을 하면 그날의 섹터 비중이 저장되어 추이가 쌓입니다.")
 
     # ---- 종목별 보유현황 ----
     SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
@@ -806,6 +987,7 @@ with tab_port:
             df2, stock_val2, total_assets2, unreal2 = compute_metrics(holdings, state["cash"])
             adjusted2 = total_assets2 + unreal2
             snapshot_history(total_assets2, adjusted2)
+            snapshot_sector_history(compute_sector_weights(df2))
         st.rerun()
 
     st.caption("시세는 네이버 금융 비공식 API 기준이며 지연/실패할 수 있습니다.")
@@ -928,6 +1110,7 @@ with tab_tx:
 
             df4, val4, total4, unreal4 = compute_metrics(holdings2, state2["cash"])
             snapshot_history(total4, total4 + unreal4)
+            snapshot_sector_history(compute_sector_weights(df4))
 
             msg = f"{tx_kind} 기록 완료: {tx_name} {tx_qty:.0f}주 @ {tx_price:,.0f}원"
             if realized is not None:
