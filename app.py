@@ -633,6 +633,20 @@ st.markdown(f"""
         padding-left: 0.2rem !important;
         padding-right: 0.2rem !important;
     }}
+    /* ---- 탭 바 우측 새로고침 아이콘 버튼 ---- */
+    div.st-key-header_refresh_btn > div > button {{
+        border-radius: 999px !important;
+        width: 30px !important;
+        height: 30px !important;
+        min-height: 30px !important;
+        padding: 0 !important;
+        font-size: 15px !important;
+        line-height: 1 !important;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -674,6 +688,19 @@ with col_theme:
 holdings = load_holdings()
 state = load_state()
 tx = load_transactions()
+
+col_tabs_spacer, col_refresh_icon = st.columns([6, 1])
+with col_refresh_icon:
+    header_refresh_clicked = st.button("⟳", key="header_refresh_btn", help="시세 새로고침")
+
+if header_refresh_clicked:
+    with st.spinner("종목명으로 시세를 찾는 중..."):
+        holdings = refresh_all_prices(holdings)
+        df_r, stock_val_r, total_assets_r, unreal_r = compute_metrics(holdings, state["cash"])
+        adjusted_r = total_assets_r + unreal_r
+        snapshot_history(total_assets_r, adjusted_r)
+        snapshot_sector_history(compute_sector_weights(df_r))
+    st.rerun()
 
 tab_port, tab_tx = st.tabs(["포트폴리오", "거래 기록"])
 
@@ -915,7 +942,7 @@ with tab_port:
     rows = df_sorted.to_dict("records")
 
     if not rows:
-        st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
+        st.info("보유 종목이 없습니다. '거래 기록' 탭에서 매수를 기록해보세요.")
     else:
         for r in rows:
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
@@ -942,43 +969,6 @@ with tab_port:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
-    # ---- 새로고침 / 종목 편집 ----
-    col_r, col_e = st.columns([1, 1])
-    with col_r:
-        refresh_clicked = st.button("시세 새로고침", use_container_width=True, key="refresh_btn")
-    with col_e:
-        with st.popover("종목 편집", use_container_width=True):
-            st.caption("종목코드는 몰라도 됩니다 — 종목명만 정확히 입력하면 새로고침할 때 자동으로 찾아옵니다.")
-            edited = st.data_editor(
-                holdings,
-                num_rows="dynamic",
-                use_container_width=True,
-                column_order=EDIT_COLUMNS,
-                column_config={
-                    "종목명": st.column_config.TextColumn(required=True, help="정확한 종목명을 입력하세요 (예: 삼성전자)"),
-                    "섹터": st.column_config.TextColumn(),
-                    "수량": st.column_config.NumberColumn(min_value=0, step=1),
-                    "평단가": st.column_config.NumberColumn(min_value=0, step=100, format="%.0f"),
-                    "현재가": st.column_config.NumberColumn(min_value=0, step=100, format="%.0f"),
-                },
-                key="editor",
-            )
-            if st.button("저장", use_container_width=True, key="save_edit_btn"):
-                save_holdings(edited)
-                st.success("저장했습니다.")
-                st.rerun()
-
-    if refresh_clicked:
-        with st.spinner("종목명으로 시세를 찾는 중..."):
-            holdings = refresh_all_prices(holdings)
-            df2, stock_val2, total_assets2, unreal2 = compute_metrics(holdings, state["cash"])
-            adjusted2 = total_assets2 + unreal2
-            snapshot_history(total_assets2, adjusted2)
-            snapshot_sector_history(compute_sector_weights(df2))
-        st.rerun()
-
-    st.caption("시세는 네이버 금융 비공식 API 기준이며 지연/실패할 수 있습니다.")
 
 # ==================================================================== #
 # 탭 2: 거래 기록 + 자산 추이
