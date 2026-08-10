@@ -432,18 +432,26 @@ st.markdown(f"""
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
     .legend-pct {{ color:{T['muted']}; font-family: ui-monospace, monospace; }}
 
-    .sector-bar-list {{ margin-top:16px; }}
-    .sector-bar-row {{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }}
-    .sector-bar-label {{ font-size:12.5px; font-weight:600; color:{T['text']}; width:78px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-    .sector-bar-track {{ position:relative; flex:1; height:10px; background:{T['card2']}; border-radius:5px; overflow:visible; }}
-    .sector-bar-fill {{ position:absolute; left:0; top:0; height:100%; border-radius:5px;
-        background-image: repeating-linear-gradient(to right, var(--sbcolor) 0px, var(--sbcolor) 5px, transparent 5px, transparent 8px); }}
-    .sector-target-marker {{ position:absolute; top:-3px; bottom:-3px; width:2px; background:{T['text']}; opacity:0.55; }}
-    .sector-bar-pct {{ font-size:12px; color:{T['muted']}; width:132px; flex-shrink:0; text-align:right; font-family: ui-monospace, monospace; white-space:nowrap; }}
+    .sector-bar-list {{ margin-top:10px; }}
+    .sector-scale-row {{ display:flex; align-items:center; gap:6px; margin-bottom:4px; }}
+    .sector-scale-spacer {{ width:64px; flex-shrink:0; }}
+    .sector-scale-track {{ position:relative; flex:1; height:12px; }}
+    .sector-scale-track span {{ position:absolute; transform:translateX(-50%); font-size:9.5px; color:{T['muted2']}; }}
+    .sector-scale-track span:first-child {{ transform:none; }}
+    .sector-scale-track span:last-child {{ transform:translateX(-100%); }}
+    .sector-scale-pctcol {{ width:108px; flex-shrink:0; }}
+    .sector-bar-row {{ display:flex; align-items:center; gap:6px; margin-bottom:3px; }}
+    .sector-bar-label {{ font-size:11px; font-weight:600; color:{T['text']}; width:64px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .sector-bar-track {{ position:relative; flex:1; height:8px; background:{T['card2']}; border-radius:4px; overflow:visible; }}
+    .sector-bar-fill {{ position:absolute; left:0; top:0; height:100%; border-radius:4px;
+        background-image: repeating-linear-gradient(to right, var(--sbcolor) 0px, var(--sbcolor) 4px, transparent 4px, transparent 7px); }}
+    .sector-target-marker {{ position:absolute; top:-2px; bottom:-2px; width:2px; background:{T['text']}; opacity:0.55; }}
+    .sector-bar-pct {{ font-size:11px; color:{T['muted']}; width:108px; flex-shrink:0; text-align:right; font-family: ui-monospace, monospace; white-space:nowrap; }}
     .sector-bar-pct .cur {{ font-weight:700; color:{T['text']}; }}
-    .sector-bar-pct .delta {{ margin-left:4px; }}
-    .sector-bar-pct .target {{ margin-left:6px; color:{T['muted2']}; }}
-    .sector-hist-note {{ font-size:11.5px; color:{T['muted2']}; margin-top:4px; }}
+    .sector-bar-pct .delta {{ margin-left:3px; }}
+    .sector-bar-pct .target {{ margin-left:4px; color:{T['muted2']}; }}
+    .sector-hist-note {{ font-size:10.5px; color:{T['muted2']}; margin-top:3px; }}
+
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
     .stock-top {{ display:flex; justify-content:space-between; align-items:baseline; }}
@@ -471,14 +479,14 @@ st.markdown(f"""
         color: {T['text']} !important;
         border: 1px solid {T['border']} !important;
         box-shadow: none !important;
-        border-radius: 10px;
+        border-radius: 8px;
         font-weight: 600;
-        font-size: 12px;
+        font-size: 11px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        padding-left: 0.35rem;
-        padding-right: 0.35rem;
+        padding: 0.2rem 0.35rem;
+        min-height: 1.7rem;
     }}
     div.stButton > button p {{ color: {T['text']} !important; }}
     div.stFormSubmitButton > button,
@@ -786,7 +794,7 @@ with tab_port:
 
         # ---- 섹터별 현재 비중 막대 (주식 총자산 대비, 예수금 제외) + 목표 비중 ----
         if stock_weight_rank:
-            st.markdown("##### 섹터별 비중 (주식 자산 기준 · 목표 대비)")
+            st.markdown("##### 섹터별 비중")
 
             sec_hist = load_sector_history()
             prev_weights = {}
@@ -797,19 +805,28 @@ with tab_port:
                     prev_date = past_dates[-1]
                     prev_weights = sec_hist[sec_hist["날짜"] == prev_date].set_index("섹터그룹")["비중"].to_dict()
 
-            if "sector_trend_pick" not in st.session_state or st.session_state.sector_trend_pick not in stock_weights:
-                st.session_state.sector_trend_pick = stock_weight_rank[0][0]
+            if st.session_state.get("sector_trend_pick") not in stock_weights:
+                st.session_state.sector_trend_pick = None
 
-            scale_max = max([v for _, v in stock_weight_rank] + list(SECTOR_TARGETS.values()) + [10]) * 1.15
+            SCALE_MAX = 40.0  # 종목 특성상 한 섹터가 40%를 넘지 않는다는 전제의 고정 스케일(배터리 게이지 방식)
+
+            # 0~40% 눈금 (막대 열 폭에 맞춰 정렬)
+            ticks_html = "".join(f'<span style="left:{t/SCALE_MAX*100:.1f}%">{t:.0f}%</span>' for t in (0, 10, 20, 30, 40))
+            st.markdown(
+                f'<div class="sector-scale-row"><div class="sector-scale-spacer"></div>'
+                f'<div class="sector-scale-track">{ticks_html}</div>'
+                f'<div class="sector-scale-pctcol"></div></div>',
+                unsafe_allow_html=True,
+            )
 
             for name, pct in stock_weight_rank:
                 color = color_map.get(name, "#888")
-                width_pct = max(min(pct / scale_max * 100, 100), 0)
+                width_pct = max(min(pct / SCALE_MAX * 100, 100), 0)
                 target = SECTOR_TARGETS.get(name)
                 target_marker = ""
                 target_label = ""
                 if target is not None:
-                    target_pos = max(min(target / scale_max * 100, 100), 0)
+                    target_pos = max(min(target / SCALE_MAX * 100, 100), 0)
                     target_marker = f'<div class="sector-target-marker" style="left:{target_pos}%"></div>'
                     target_label = f'<span class="target">| {target:.0f}%</span>'
                 delta_html = ""
@@ -820,11 +837,12 @@ with tab_port:
                         dsign = "+" if delta > 0 else ""
                         delta_html = f'<span class="delta" style="color:{dcolor}">{dsign}{delta:.1f}%p</span>'
 
-                c1, c2, c3 = st.columns([1.15, 3.1, 1.85])
+                is_open = st.session_state.sector_trend_pick == name
+                c1, c2, c3 = st.columns([1.05, 3.1, 1.75])
                 with c1:
-                    label = f"▶ {name}" if st.session_state.sector_trend_pick == name else name
+                    label = f"▾ {name}" if is_open else name
                     if st.button(label, key=f"sector_pick_{name}", use_container_width=True):
-                        st.session_state.sector_trend_pick = name
+                        st.session_state.sector_trend_pick = None if is_open else name
                         st.rerun()
                 with c2:
                     st.markdown(
@@ -839,44 +857,38 @@ with tab_port:
                         unsafe_allow_html=True,
                     )
 
-            st.caption("점선 막대 색은 도넛 색상과 동일 · | 는 목표 비중 · 종목명을 누르면 아래에 해당 섹터의 추이가 표시됩니다.")
+                if is_open:
+                    if not sec_hist.empty and name in sec_hist["섹터그룹"].unique():
+                        series = sec_hist[sec_hist["섹터그룹"] == name].sort_values("날짜")
+                        dates = series["날짜"].tolist()
+                        vals = series["비중"].tolist()
 
-            # ---- 선택한 섹터의 날짜별 추이 ----
-            picked = st.session_state.sector_trend_pick
-            st.markdown(f"**{picked} 비중 추이**")
+                        fig2, ax2 = plt.subplots(figsize=(4.6, 2.2))
+                        fig2.patch.set_alpha(0)
+                        ax2.set_facecolor("none")
+                        x2 = list(range(len(dates)))
+                        ax2.plot(x2, vals, color=color, linewidth=2.0, marker="o", markersize=3)
+                        ax2.plot([x2[-1]], [vals[-1]], marker="o", markersize=7, color=color)
+                        if target is not None:
+                            ax2.axhline(target, color=T["muted2"], linewidth=1, linestyle="--")
+                        ax2.set_ylim(0, 40)
+                        ax2.set_xticks(x2)
+                        ax2.set_xticklabels([d[5:] for d in dates], fontsize=8, color=T["muted"])
+                        ax2.tick_params(axis="y", labelsize=8, colors=T["muted"])
+                        for spine in ax2.spines.values():
+                            spine.set_visible(False)
+                        ax2.grid(axis="y", color=T["border"], linewidth=0.6)
+                        st.pyplot(fig2, use_container_width=True)
+                        plt.close(fig2)
+                        st.markdown(
+                            '<div class="sector-hist-note">y축 0~40% · 시세 새로고침/거래 기록 시 오늘자 비중이 저장됩니다.'
+                            + (' 점선은 목표 비중.' if target is not None else '') + '</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.info("시세 새로고침 또는 거래 기록을 하면 그날의 섹터 비중이 저장되어 추이가 쌓입니다.")
 
-            if not sec_hist.empty and picked in sec_hist["섹터그룹"].unique():
-                series = sec_hist[sec_hist["섹터그룹"] == picked].sort_values("날짜")
-                dates = series["날짜"].tolist()
-                vals = series["비중"].tolist()
-                baseline = vals[0]
-                rel = [v - baseline for v in vals]
-
-                fig2, ax2 = plt.subplots(figsize=(4.6, 2.6))
-                fig2.patch.set_alpha(0)
-                ax2.set_facecolor("none")
-                x2 = list(range(len(dates)))
-                line_color = color_map.get(picked, UP_COLOR)
-                ax2.plot(x2, rel, color=line_color, linewidth=2.0, marker="o", markersize=3)
-                ax2.plot([x2[-1]], [rel[-1]], marker="o", markersize=7, color=line_color)
-                ax2.axhline(0, color=T["muted2"], linewidth=1, linestyle="--")
-                ax2.set_ylim(-15, 15)
-                ax2.set_xticks(x2)
-                ax2.set_xticklabels([d[5:] for d in dates], fontsize=8, color=T["muted"])
-                ax2.tick_params(axis="y", labelsize=8, colors=T["muted"])
-                for spine in ax2.spines.values():
-                    spine.set_visible(False)
-                ax2.grid(axis="y", color=T["border"], linewidth=0.6)
-                st.pyplot(fig2, use_container_width=True)
-                plt.close(fig2)
-                st.markdown(
-                    '<div class="sector-hist-note">y=0%는 추적 시작일(첫 기록일) 기준이며, '
-                    '이후 비중 변화(%p)를 누적해서 보여줍니다. y축 범위는 -15%~15%로 시작(추후 조정 가능) · '
-                    '시세 새로고침 또는 거래 기록을 할 때마다 오늘자 스냅샷이 갱신됩니다.</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.info("시세 새로고침 또는 거래 기록을 하면 그날의 섹터 비중이 저장되어 추이가 쌓입니다.")
+            st.caption("점선 막대 색은 도넛 색상과 동일 · | 는 목표 비중 · 섹터명을 누르면 추이 그래프가 열리고, 다시 누르면 닫힙니다.")
 
     # ---- 종목별 보유현황 ----
     SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
