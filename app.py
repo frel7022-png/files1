@@ -38,28 +38,6 @@ SECTOR_PALETTE = [
     "#FBBF24", "#60A5FA", "#F87171", "#C084FC", "#38BDF8", "#FB923C",
 ]
 
-# 섹터 비중 도넛차트 전용 그룹 매핑(종목별 보유현황의 세부 섹터는 그대로 유지됨)
-SECTOR_GROUP_MAP = {
-    "반도체소재": "반도체",
-    "반도체장비": "반도체",
-    "인터넷": "인터넷·유통·물류",
-    "유통": "인터넷·유통·물류",
-    "물류": "인터넷·유통·물류",
-    "제약": "제약·바이오",
-    "바이오": "제약·바이오",
-    "식품": "식품",
-    "에너지": "에너지·화학",
-    "에너지기자재": "에너지·화학",
-    "화학섬유": "에너지·화학",
-    "건자재": "건설·건자재",
-    "건설": "건설·건자재",
-}
-
-
-def group_sector(sector: str) -> str:
-    """섹터 비중 차트용 그룹명 반환. 매핑에 없으면 원래 섹터명 그대로."""
-    return SECTOR_GROUP_MAP.get(sector, sector)
-
 THEMES = {
     "dark": {
         "bg": "#0a0c10", "card": "#12151c", "card2": "#20242e", "border": "#2b303c",
@@ -371,6 +349,14 @@ st.markdown(f"""
     .capital-line {{ margin-top:10px; padding-top:10px; border-top:1px solid {T['border']}; font-size:12.5px; color:{T['muted']}; }}
     .capital-line b {{ font-size:14px; }}
 
+    .daily-trade-box {{ margin-top:10px; padding-top:10px; border-top:1px solid {T['border']}; font-size:12.5px; color:{T['muted']}; }}
+    .daily-trade-count {{ font-size:13px; color:{T['text']}; font-weight:700; margin-bottom:6px; }}
+    .daily-trade-count span {{ font-weight:400; color:{T['muted']}; margin-left:4px; }}
+    .daily-trade-row {{ display:flex; flex-wrap:wrap; gap:6px 8px; align-items:baseline; margin-top:4px; }}
+    .daily-trade-row .tag-label {{ font-size:12px; font-weight:700; min-width:30px; }}
+    .trade-chip {{ font-size:12px; background:{T['bg']}; border:1px solid {T['border']}; border-radius:99px; padding:2px 9px; color:{T['text']}; }}
+    .trade-chip b {{ font-weight:600; }}
+
     .legend-wrap {{ display:flex; flex-wrap:wrap; gap:7px 14px; margin-top:10px; justify-content:center; }}
     .legend-item {{ display:flex; align-items:center; gap:5px; font-size:12px; color:{T['text']}; }}
     .legend-dot {{ width:8px; height:8px; border-radius:99px; flex-shrink:0; }}
@@ -634,6 +620,33 @@ with tab_port:
     daily_color = UP_COLOR if daily_pnl > 0 else (DOWN_COLOR if daily_pnl < 0 else T["muted"])
     daily_sign = "+" if daily_pnl > 0 else ""
 
+    # ---- 오늘의 거래 요약 (매수/매도 종목별 총금액) ----
+    buy_tx = today_tx[today_tx["구분"] == "매수"].copy()
+    sell_tx = today_tx[today_tx["구분"] == "매도"].copy()
+    buy_tx["총금액"] = pd.to_numeric(buy_tx["수량"], errors="coerce") * pd.to_numeric(buy_tx["단가"], errors="coerce")
+    sell_tx["총금액"] = pd.to_numeric(sell_tx["수량"], errors="coerce") * pd.to_numeric(sell_tx["단가"], errors="coerce")
+    buy_by_stock = buy_tx.groupby("종목명")["총금액"].sum().sort_values(ascending=False)
+    sell_by_stock = sell_tx.groupby("종목명")["총금액"].sum().sort_values(ascending=False)
+    total_trade_count = len(today_tx)
+
+    def _chips(series):
+        if series.empty:
+            return '<span class="trade-chip">없음</span>'
+        return "".join(
+            f'<span class="trade-chip">{name} <b>{amt:,.0f}원</b></span>'
+            for name, amt in series.items()
+        )
+
+    daily_trade_html = f"""
+    <div class="daily-trade-box">
+        <div class="daily-trade-count">일일거래 총 {total_trade_count}회
+            <span>(매수 {len(buy_tx)}건 · 매도 {len(sell_tx)}건)</span>
+        </div>
+        <div class="daily-trade-row"><span class="tag-label" style="color:{UP_COLOR}">매수</span>{_chips(buy_by_stock)}</div>
+        <div class="daily-trade-row"><span class="tag-label" style="color:{DOWN_COLOR}">매도</span>{_chips(sell_by_stock)}</div>
+    </div>
+    """
+
     st.markdown(f"""
     <div class="summary-box">
         <div class="summary-label">보유종목 평가손익</div>
@@ -650,6 +663,7 @@ with tab_port:
         <div class="capital-line">최초 자본 10,000,000원 대비&nbsp;
             <b style="color:{cap_color}">{cap_sign}{capital_return:,.0f}원 ({cap_sign}{capital_return_pct:.2f}%)</b>
         </div>
+        {daily_trade_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -658,9 +672,7 @@ with tab_port:
         include_cash = st.toggle("예수금 포함", value=st.session_state.get("include_cash", True), key="cash_toggle")
         st.session_state["include_cash"] = include_cash
 
-        df_sector_grouped = df.copy()
-        df_sector_grouped["섹터그룹"] = df_sector_grouped["섹터"].apply(group_sector)
-        sector_val = df_sector_grouped.groupby("섹터그룹")["평가금액"].sum().to_dict()
+        sector_val = df.groupby("섹터")["평가금액"].sum().to_dict()
         if include_cash and state["cash"] > 0:
             sector_val[CASH_LABEL] = state["cash"]
         sector_items = sorted(sector_val.items(), key=lambda x: x[1], reverse=True)
