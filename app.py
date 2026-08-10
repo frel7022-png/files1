@@ -620,30 +620,22 @@ with tab_port:
     daily_color = UP_COLOR if daily_pnl > 0 else (DOWN_COLOR if daily_pnl < 0 else T["muted"])
     daily_sign = "+" if daily_pnl > 0 else ""
 
-    # ---- 오늘의 거래 요약 (매수/매도 종목별 총금액) ----
+    # ---- 오늘의 거래 요약 (매수/매도 총금액) ----
     buy_tx = today_tx[today_tx["구분"] == "매수"].copy()
     sell_tx = today_tx[today_tx["구분"] == "매도"].copy()
-    buy_tx["총금액"] = pd.to_numeric(buy_tx["수량"], errors="coerce") * pd.to_numeric(buy_tx["단가"], errors="coerce")
-    sell_tx["총금액"] = pd.to_numeric(sell_tx["수량"], errors="coerce") * pd.to_numeric(sell_tx["단가"], errors="coerce")
-    buy_by_stock = buy_tx.groupby("종목명")["총금액"].sum().sort_values(ascending=False)
-    sell_by_stock = sell_tx.groupby("종목명")["총금액"].sum().sort_values(ascending=False)
+    buy_total_amt = (pd.to_numeric(buy_tx["수량"], errors="coerce") * pd.to_numeric(buy_tx["단가"], errors="coerce")).sum()
+    sell_total_amt = (pd.to_numeric(sell_tx["수량"], errors="coerce") * pd.to_numeric(sell_tx["단가"], errors="coerce")).sum()
     total_trade_count = len(today_tx)
-
-    def _chips(series):
-        if series.empty:
-            return '<span class="trade-chip">없음</span>'
-        return "".join(
-            f'<span class="trade-chip">{name} <b>{amt:,.0f}원</b></span>'
-            for name, amt in series.items()
-        )
 
     daily_trade_html = f"""
     <div class="daily-trade-box">
         <div class="daily-trade-count">일일거래 총 {total_trade_count}회
             <span>(매수 {len(buy_tx)}건 · 매도 {len(sell_tx)}건)</span>
         </div>
-        <div class="daily-trade-row"><span class="tag-label" style="color:{UP_COLOR}">매수</span>{_chips(buy_by_stock)}</div>
-        <div class="daily-trade-row"><span class="tag-label" style="color:{DOWN_COLOR}">매도</span>{_chips(sell_by_stock)}</div>
+        <div class="daily-trade-row"><span class="tag-label" style="color:{UP_COLOR}">매수</span>
+            <span class="trade-chip"><b>{buy_total_amt:,.0f}원</b></span></div>
+        <div class="daily-trade-row"><span class="tag-label" style="color:{DOWN_COLOR}">매도</span>
+            <span class="trade-chip"><b>{sell_total_amt:,.0f}원</b></span></div>
     </div>
     """
 
