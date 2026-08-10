@@ -38,6 +38,28 @@ SECTOR_PALETTE = [
     "#FBBF24", "#60A5FA", "#F87171", "#C084FC", "#38BDF8", "#FB923C",
 ]
 
+# 섹터 비중 도넛차트 전용 그룹 매핑(종목별 보유현황의 세부 섹터는 그대로 유지됨)
+SECTOR_GROUP_MAP = {
+    "반도체소재": "반도체",
+    "반도체장비": "반도체",
+    "인터넷": "인터넷·유통·물류",
+    "유통": "인터넷·유통·물류",
+    "물류": "인터넷·유통·물류",
+    "제약": "제약·바이오",
+    "바이오": "제약·바이오",
+    "식품": "식품",
+    "에너지": "에너지·화학",
+    "에너지기자재": "에너지·화학",
+    "화학섬유": "에너지·화학",
+    "건자재": "건설·건자재",
+    "건설": "건설·건자재",
+}
+
+
+def group_sector(sector: str) -> str:
+    """섹터 비중 차트용 그룹명 반환. 매핑에 없으면 원래 섹터명 그대로."""
+    return SECTOR_GROUP_MAP.get(sector, sector)
+
 THEMES = {
     "dark": {
         "bg": "#0a0c10", "card": "#12151c", "card2": "#20242e", "border": "#2b303c",
@@ -636,7 +658,9 @@ with tab_port:
         include_cash = st.toggle("예수금 포함", value=st.session_state.get("include_cash", True), key="cash_toggle")
         st.session_state["include_cash"] = include_cash
 
-        sector_val = df.groupby("섹터")["평가금액"].sum().to_dict()
+        df_sector_grouped = df.copy()
+        df_sector_grouped["섹터그룹"] = df_sector_grouped["섹터"].apply(group_sector)
+        sector_val = df_sector_grouped.groupby("섹터그룹")["평가금액"].sum().to_dict()
         if include_cash and state["cash"] > 0:
             sector_val[CASH_LABEL] = state["cash"]
         sector_items = sorted(sector_val.items(), key=lambda x: x[1], reverse=True)
