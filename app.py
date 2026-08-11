@@ -7,6 +7,8 @@
 """
 
 import calendar
+import hashlib
+import io
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -25,6 +27,7 @@ TX_FILE = HERE / "transactions.csv"
 STATE_FILE = HERE / "account_state.csv"
 HISTORY_FILE = HERE / "asset_history.csv"
 SECTOR_HISTORY_FILE = HERE / "sector_history.csv"
+IMPORT_LOG_FILE = HERE / "import_log.csv"
 
 HOLD_COLUMNS = ["종목명", "종목코드", "섹터", "수량", "평단가", "현재가", "등락률", "업데이트시각"]
 TX_COLUMNS = ["id", "날짜", "종목명", "구분", "수량", "단가", "실현손익", "메모", "정산반영"]
@@ -412,6 +415,84 @@ def apply_transaction(holdings: pd.DataFrame, state: dict, name: str, kind: str,
             realized = 0.0
 
     return holdings, state, realized
+
+
+def load_import_log() -> pd.DataFrame:
+    if IMPORT_LOG_FILE.exists():
+        return pd.read_csv(IMPORT_LOG_FILE, dtype=str)
+    return pd.DataFrame(columns=["hash", "날짜", "처리시각"])
+
+
+def save_import_log(df: pd.DataFrame) -> None:
+    df.to_csv(IMPORT_LOG_FILE, index=False)
+
+
+def parse_broker_daily_csv(raw: bytes) -> pd.DataFrame:
+    """증권사 일일 매매일지 CSV(잔고/금일매수/금일매도 구조)를 파싱.
+    컬럼명이 병합헤더+개행문자라 인식이 불안정하므로 '위치(열 순서)' 기준으로 읽는다.
+    기대 열 순서: [상세, 종목명, 잔고구분, 잔고수량, 잔고평균단가,
+                  매수평균가, 매수수량, 매수금액, 매도평균가, 매도수량, 매도금액,
+                  수수료, 실현손익(증권사), 손익률, ...]
+    """
+    text = None
+    for enc in ("cp949", "utf-8-sig", "utf-8"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        raise ValueError("CSV 인코딩을 인식할 수 없습니다 (cp949/utf-8 모두 실패).")
+
+    df = pd.read_csv(io.StringIO(text))
+    if len(df) < 2 or df.shape[1] < 13:
+        raise ValueError("예상한 매매일지 형식이 아닙니다 (열 개수 부족).")
+
+    # 첫 데이터 행은 '평균가/수량/매입금액...' 서브헤더이므로 건너뜀
+    df = df.iloc[1:].reset_index(drop=True)
+    c = df.columns.tolist()
+
+    def num(series):
+        return pd.to_numeric(
+            series.astype(str).str.replace(",", "").str.strip(), errors="coerce"
+        ).fillna(0)
+
+    out = pd.DataFrame({
+        "종목명": df[c[1]].astype(str).str.strip(),
+        "매수평균가": num(df[c[5]]),
+        "매수수량": num(df[c[6]]),
+        "매도평균가": num(df[c[8]]),
+        "매도수량": num(df[c[9]]),
+        "실현손익_증권사": num(df[c[12]]),
+    })
+    out = out[out["종목명"].notna() & (out["종목명"] != "") & (out["종목명"].str.lower() != "nan")]
+    return out.reset_index(drop=True)
+
+
+def import_daily_trades(parsed: pd.DataFrame, holdings: pd.DataFrame, state: dict,
+                         tx: pd.DataFrame, trade_date: str):
+    """파싱된 일일 매매일지를 기존 holdings/state/tx 위에 누적 반영."""
+    new_rows = []
+    for _, r in parsed.iterrows():
+        name = r["종목명"]
+        if r["매수수량"] > 0 and r["매수평균가"] > 0:
+            holdings, state, realized = apply_transaction(holdings, state, name, "매수", r["매수수량"], r["매수평균가"])
+            new_rows.append({
+                "id": str(uuid.uuid4())[:8], "날짜": trade_date, "종목명": name, "구분": "매수",
+                "수량": r["매수수량"], "단가": r["매수평균가"], "실현손익": "",
+                "메모": "CSV 업로드", "정산반영": True,
+            })
+        if r["매도수량"] > 0 and r["매도평균가"] > 0:
+            holdings, state, realized = apply_transaction(holdings, state, name, "매도", r["매도수량"], r["매도평균가"])
+            new_rows.append({
+                "id": str(uuid.uuid4())[:8], "날짜": trade_date, "종목명": name, "구분": "매도",
+                "수량": r["매도수량"], "단가": r["매도평균가"],
+                "실현손익": realized if realized is not None else "",
+                "메모": "CSV 업로드", "정산반영": True,
+            })
+    if new_rows:
+        tx = pd.concat([tx, pd.DataFrame(new_rows)], ignore_index=True)
+    return holdings, state, tx, len(new_rows)
 
 
 # ------------------------------------------------------------------ #
@@ -1122,6 +1203,57 @@ with tab_tx:
         """, unsafe_allow_html=True)
     else:
         st.info("시세를 새로고침하면 그날의 자산 스냅샷이 하나씩 쌓여 그래프가 그려집니다.")
+
+    st.divider()
+
+    # ---- 매매일지 CSV 업로드 ----
+    st.markdown("##### 매매일지 업로드 (CSV)")
+    st.caption("증권사에서 받은 일일 매매일지 CSV를 올리면 기존 기록 위에 자동으로 누적 반영됩니다.")
+
+    up_file = st.file_uploader("CSV 파일 선택", type=["csv"], key="daily_csv_uploader")
+    up_date = st.date_input("거래 날짜", value=date.today(), key="daily_csv_date")
+
+    if up_file is not None:
+        file_bytes = up_file.getvalue()
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+        import_log = load_import_log()
+        already = file_hash in import_log["hash"].values
+
+        if already:
+            st.warning("이 파일은 이미 반영된 것 같아요 (동일 파일이 감지됨).")
+            force = st.checkbox("그래도 다시 반영하기", key="daily_csv_force")
+        else:
+            force = True
+
+        if st.button("반영하기", key="daily_csv_apply", use_container_width=True, disabled=(already and not force)):
+            try:
+                parsed = parse_broker_daily_csv(file_bytes)
+            except Exception as e:
+                st.error(f"CSV를 읽는 중 문제가 발생했어요: {e}")
+            else:
+                if parsed.empty:
+                    st.warning("파일에서 종목 데이터를 찾지 못했어요. 형식을 확인해주세요.")
+                else:
+                    trade_date_str = up_date.strftime("%Y-%m-%d")
+                    holdings2, state2, tx2, n = import_daily_trades(parsed, holdings, state, tx, trade_date_str)
+                    if n == 0:
+                        st.info("이 파일에는 매수/매도 내역이 없어요 (반영할 거래가 없음).")
+                    else:
+                        save_holdings(holdings2)
+                        save_state(state2)
+                        save_transactions(tx2)
+
+                        df5, val5, total5, unreal5 = compute_metrics(holdings2, state2["cash"])
+                        snapshot_history(total5, total5 + unreal5)
+                        snapshot_sector_history(compute_sector_weights(df5))
+
+                        import_log = pd.concat([import_log, pd.DataFrame([{
+                            "hash": file_hash, "날짜": trade_date_str, "처리시각": now_kst_str(),
+                        }])], ignore_index=True)
+                        save_import_log(import_log)
+
+                        st.success(f"{n}건의 거래를 반영했어요 ({trade_date_str} 기준).")
+                        st.rerun()
 
     st.divider()
 
