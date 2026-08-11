@@ -826,7 +826,6 @@ tx = load_transactions()
 top_l, top_r = st.columns([5, 2])
 with top_r:
     refresh_clicked_top = st.button("시세 새로고침", use_container_width=True, key="refresh_btn_top")
-st.caption("시세는 네이버 금융 비공식 API 기준이며 지연/실패할 수 있습니다.")
 
 if refresh_clicked_top:
     with st.spinner("종목명으로 시세를 찾는 중..."):
