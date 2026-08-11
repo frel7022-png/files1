@@ -521,6 +521,35 @@ st.markdown(f"""
     #MainMenu, footer, header {{ visibility: hidden; }}
     h1, h2, h3, h4, h5, p, span, label, div {{ color: {T['text']}; }}
 
+    /* 파일 업로드 위젯: 기본 다크 배경 대신 앱 테마에 맞춤 */
+    section[data-testid="stFileUploaderDropzone"] {{
+        background: {T['card2']} !important;
+        border: 1px dashed {T['border']} !important;
+        border-radius: 10px !important;
+    }}
+    section[data-testid="stFileUploaderDropzone"] * {{
+        color: {T['text']} !important;
+    }}
+    section[data-testid="stFileUploaderDropzone"] small,
+    section[data-testid="stFileUploaderDropzone"] span {{
+        color: {T['muted']} !important;
+    }}
+    section[data-testid="stFileUploaderDropzone"] button {{
+        background: {T['card']} !important;
+        color: {T['text']} !important;
+        border: 1px solid {T['border']} !important;
+    }}
+    div[data-testid="stFileUploaderFile"],
+    div[data-testid="stFileUploaderFileName"] {{
+        background: {T['card']} !important;
+        border: 1px solid {T['border']} !important;
+        border-radius: 8px !important;
+        color: {T['text']} !important;
+    }}
+    div[data-testid="stFileUploaderFile"] * {{
+        color: {T['text']} !important;
+    }}
+
     .summary-box {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:14px; padding:18px 20px; margin-bottom:14px; }}
     .summary-label {{ color:{T['muted']}; font-size:13px; margin-bottom:4px; }}
     .summary-main {{ font-size:28px; font-weight:800; line-height:1.2; }}
@@ -1254,66 +1283,6 @@ with tab_tx:
 
                         st.success(f"{n}건의 거래를 반영했어요 ({trade_date_str} 기준).")
                         st.rerun()
-
-    st.divider()
-
-    # ---- 새 거래 기록 ----
-    st.markdown("##### 새 거래 기록하기")
-
-    existing_names = sorted(holdings["종목명"].dropna().astype(str).replace("", pd.NA).dropna().unique().tolist())
-    name_options = existing_names + ["기타 (직접 입력)"]
-
-    if "tx_selected_name" not in st.session_state or st.session_state.tx_selected_name not in name_options:
-        st.session_state.tx_selected_name = name_options[0] if name_options else ""
-
-    with st.popover(f"종목명: {st.session_state.tx_selected_name or '선택'}", use_container_width=True):
-        st.caption("보유 종목 중에서 선택하거나, 맨 아래 '기타'를 골라 새 종목명을 입력하세요.")
-        picked = st.radio("종목 목록", name_options, label_visibility="collapsed", key="tx_name_radio_inner")
-        st.session_state.tx_selected_name = picked
-
-    name_choice = st.session_state.tx_selected_name
-    if name_choice == "기타 (직접 입력)":
-        tx_name_input = st.text_input("새 종목명", placeholder="예: 삼성전자", key="tx_name_custom")
-    else:
-        tx_name_input = name_choice
-
-    with st.form("tx_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            tx_date = st.date_input("날짜", value=date.today())
-        with c2:
-            tx_kind = st.radio("구분", ["매수", "매도"], horizontal=True)
-            tx_qty = st.number_input("수량", min_value=0, step=1)
-        tx_price = st.number_input("단가", min_value=0, step=100)
-        tx_memo = st.text_input("메모 (선택)", placeholder="예: 분할매수 1차")
-        submitted = st.form_submit_button("기록 저장", use_container_width=True)
-
-    if submitted:
-        tx_name = (tx_name_input or "").strip()
-        if not tx_name or tx_qty <= 0 or tx_price <= 0:
-            st.error("종목명, 수량, 단가를 정확히 입력해주세요.")
-        else:
-            holdings2, state2, realized = apply_transaction(holdings, state, tx_name.strip(), tx_kind, tx_qty, tx_price)
-            new_row = {
-                "id": str(uuid.uuid4())[:8], "날짜": tx_date.strftime("%Y-%m-%d"),
-                "종목명": tx_name.strip(), "구분": tx_kind, "수량": tx_qty, "단가": tx_price,
-                "실현손익": realized if realized is not None else "", "메모": tx_memo, "정산반영": True,
-            }
-            tx2 = pd.concat([tx, pd.DataFrame([new_row])], ignore_index=True)
-
-            save_holdings(holdings2)
-            save_state(state2)
-            save_transactions(tx2)
-
-            df4, val4, total4, unreal4 = compute_metrics(holdings2, state2["cash"])
-            snapshot_history(total4, total4 + unreal4)
-            snapshot_sector_history(compute_sector_weights(df4))
-
-            msg = f"{tx_kind} 기록 완료: {tx_name} {tx_qty:.0f}주 @ {tx_price:,.0f}원"
-            if realized is not None:
-                msg += f" (실현손익 {realized:+,.0f}원)"
-            st.success(msg)
-            st.rerun()
 
     st.divider()
 
