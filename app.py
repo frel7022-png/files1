@@ -492,6 +492,26 @@ st.markdown(f"""
     .cell .bottom {{ font-size:11px; color:{T['muted']}; margin-top:2px; }}
     .stock-foot {{ display:flex; justify-content:flex-end; margin-top:6px; font-size:10px; color:{T['muted2']}; }}
 
+    /* 종목 카드 자체를 버튼처럼: 마커가 있는 블록을 relative로 만들고, 그 안의 버튼을 카드 위에 투명하게 덮음 */
+    div[data-testid="stVerticalBlock"]:has(div[data-testid="stMarkdown"] .stock-card-marker) {{
+        position: relative;
+    }}
+    div[data-testid="stVerticalBlock"]:has(div[data-testid="stMarkdown"] .stock-card-marker) div[data-testid="stButton"] {{
+        position: absolute; inset: 0; z-index: 5; margin: 0;
+    }}
+    div[data-testid="stVerticalBlock"]:has(div[data-testid="stMarkdown"] .stock-card-marker) div[data-testid="stButton"] button {{
+        width: 100%; height: 100%; opacity: 0; cursor: pointer;
+        padding: 0 !important; margin: 0 !important; border: none !important;
+        background: transparent !important; min-height: 0 !important;
+    }}
+
+    .stock-detail-panel {{ background:{T['card2']}; border:1px solid {T['border']}; border-top:none; border-radius:0 0 12px 12px;
+        margin:-9px 0 7px 0; padding:8px 16px 9px 16px; }}
+    .stock-detail-row {{ display:flex; align-items:center; gap:8px; font-size:12px; padding:2px 0; }}
+    .stock-detail-row span:first-child {{ color:{T['muted']}; width:78px; flex-shrink:0; }}
+    .stock-detail-row b {{ color:{T['text']}; width:38px; flex-shrink:0; }}
+    .stock-detail-row .amt {{ margin-left:auto; font-weight:700; color:{T['text']}; font-family: ui-monospace, monospace; }}
+
     .tx-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:10px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }}
     .tx-left {{ font-size:13px; }}
     .tx-left .name {{ font-weight:700; color:{T['text']}; }}
@@ -1058,7 +1078,7 @@ with tab_port:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                if st.button("", key=f"stock_click_{name}", use_container_width=True):
+                if st.button(" ", key=f"stock_click_{name}", use_container_width=True):
                     st.session_state.stock_detail_pick = None if st.session_state.stock_detail_pick == name else name
                     st.rerun()
 
