@@ -203,6 +203,38 @@ def snapshot_sector_history(weights: dict) -> None:
 # 네이버 금융: 종목명 → 종목코드 자동 검색 + 시세 조회
 # ------------------------------------------------------------------ #
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def get_current_prices_for_names(names: list[str]) -> dict:
+    """종목명 리스트의 현재가 조회. 보유 여부와 무관 — 청산된 종목 추적용."""
+    name_to_code = {}
+    for n in names:
+        code = resolve_code(n)
+        if code:
+            name_to_code[n] = code
+    quotes = fetch_quotes(list(name_to_code.values()))
+    result = {}
+    for n, code in name_to_code.items():
+        if code in quotes:
+            result[n] = quotes[code]["price"]
+    return result
+
+
+def get_closed_out_last_sells(holdings_df: pd.DataFrame, tx_df: pd.DataFrame) -> pd.DataFrame:
+    """현재 보유 중이 아닌(=완전히 매도한) 종목들의 마지막 매도일/매도가."""
+    sell_tx = tx_df[tx_df["구분"] == "매도"].copy()
+    if sell_tx.empty:
+        return pd.DataFrame(columns=["종목명", "매도일", "매도가"])
+    sell_tx["단가"] = pd.to_numeric(sell_tx["단가"], errors="coerce")
+    held_names = set(holdings_df["종목명"].tolist())
+    sell_tx = sell_tx[~sell_tx["종목명"].isin(held_names)]
+    sell_tx = sell_tx[sell_tx["단가"].notna() & (sell_tx["단가"] > 0)]
+    if sell_tx.empty:
+        return pd.DataFrame(columns=["종목명", "매도일", "매도가"])
+    sell_tx = sell_tx.sort_values(["종목명", "날짜", "id"])
+    last = sell_tx.groupby("종목명", as_index=False).tail(1)[["종목명", "날짜", "단가"]]
+    last = last.rename(columns={"날짜": "매도일", "단가": "매도가"})
+    return last.reset_index(drop=True)
+
+
 def resolve_code(name: str):
     name = (name or "").strip()
     if not name:
@@ -442,6 +474,12 @@ st.markdown(f"""
     .sector-bar-pct .cur {{ font-weight:700; color:{T['text']}; }}
     .sector-bar-pct .delta {{ margin-left:3px; }}
     .sector-stock-names {{ font-size:10.5px; color:{T['muted2']}; margin:2px 0 0 2px; }}
+
+    .updown-row {{ display:flex; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid {T['border']}; font-size:12.5px; }}
+    .updown-row:last-child {{ border-bottom:none; }}
+    .updown-row .name {{ font-weight:700; color:{T['text']}; flex:1; }}
+    .updown-row .pct {{ font-weight:700; font-family: ui-monospace, monospace; width:62px; text-align:right; }}
+    .updown-row .detail {{ font-size:11px; color:{T['muted']}; font-family: ui-monospace, monospace; width:118px; text-align:right; }}
 
 
     .stock-card {{ background:{T['card']}; border:1px solid {T['border']}; border-radius:12px; padding:10px 16px; margin-bottom:7px; }}
@@ -887,6 +925,57 @@ with tab_port:
                     else:
                         st.info("시세 새로고침 또는 거래 기록을 하면 그날의 섹터 비중이 저장되어 추이가 쌓입니다.")
 
+    # ---- Up/Down: 청산 종목 추적 ----
+    with st.expander("Up/Down", expanded=False):
+        mode = st.radio("모드", ["DOWN", "UP"], horizontal=True,
+                         label_visibility="collapsed", key="updown_mode")
+
+        if st.button("새로고침", key="updown_refresh", use_container_width=True):
+            closed = get_closed_out_last_sells(holdings, tx)
+            results = []
+            if not closed.empty:
+                with st.spinner("청산 종목 현재가 조회 중..."):
+                    prices = get_current_prices_for_names(closed["종목명"].tolist())
+                for _, row in closed.iterrows():
+                    cp = prices.get(row["종목명"])
+                    if cp is None:
+                        continue
+                    pct = (cp - row["매도가"]) / row["매도가"] * 100
+                    results.append({
+                        "종목명": row["종목명"], "매도일": row["매도일"],
+                        "매도가": row["매도가"], "현재가": cp, "pct": pct,
+                    })
+            st.session_state["updown_results"] = results
+            st.session_state["updown_checked_at"] = now_kst_str()
+            st.rerun()
+
+        results = st.session_state.get("updown_results")
+        checked_at = st.session_state.get("updown_checked_at")
+
+        if results is None:
+            st.caption("새로고침을 누르면 청산(완전 매도)된 종목의 현재가를 마지막 매도가와 비교합니다.")
+        else:
+            if checked_at:
+                st.caption(f"마지막 조회: {checked_at}")
+            threshold = 3.0
+            if mode == "DOWN":
+                filtered = sorted([r for r in results if r["pct"] <= -threshold], key=lambda r: r["pct"])
+                color = DOWN_COLOR
+            else:
+                filtered = sorted([r for r in results if r["pct"] >= threshold], key=lambda r: -r["pct"])
+                color = UP_COLOR
+
+            if not filtered:
+                st.caption("조건에 해당하는 종목이 없습니다.")
+            else:
+                rows_html = "".join(
+                    f'<div class="updown-row"><span class="name">{r["종목명"]}</span>'
+                    f'<span class="pct" style="color:{color}">{"+" if r["pct"] >= 0 else ""}{r["pct"]:.1f}%</span>'
+                    f'<span class="detail">{r["매도가"]:,.0f} → {r["현재가"]:,.0f}</span></div>'
+                    for r in filtered
+                )
+                st.markdown(rows_html, unsafe_allow_html=True)
+
     # ---- 종목별 보유현황 ----
     SORT_OPTIONS = {"비중": "weight", "섹터": "sector", "현재가": "price",
                      "평가금액": "valuation", "손익": "profit"}
@@ -938,31 +1027,64 @@ with tab_port:
     if not rows:
         st.info("보유 종목이 없습니다. '거래 기록' 탭에서 매수를 기록해보세요.")
     else:
+        if "stock_detail_pick" not in st.session_state:
+            st.session_state.stock_detail_pick = None
+
         for r in rows:
+            name = r["종목명"]
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
             psign = "+" if r["손익"] >= 0 else ""
             cc = UP_COLOR if r["등락률"] >= 0 else DOWN_COLOR
             csign = "+" if r["등락률"] >= 0 else ""
             sc = sector_color_map.get(r["섹터"], "#6b7280")
 
-            st.markdown(f"""
-            <div class="stock-card">
-                <div class="stock-top">
-                    <span><span class="stock-name">{r['종목명']}</span>
-                        <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                    <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-                </div>
-                <div class="stock-grid">
-                    <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                    <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                    <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                    <div class="cell">
-                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                        <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
+            with st.container():
+                st.markdown(f"""
+                <div class="stock-card-marker"></div>
+                <div class="stock-card">
+                    <div class="stock-top">
+                        <span><span class="stock-name">{name}</span>
+                            <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                        <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
+                    </div>
+                    <div class="stock-grid">
+                        <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                        <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                        <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                        <div class="cell">
+                            <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                            <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
+                        </div>
                     </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+                if st.button("", key=f"stock_click_{name}", use_container_width=True):
+                    st.session_state.stock_detail_pick = None if st.session_state.stock_detail_pick == name else name
+                    st.rerun()
+
+            if st.session_state.stock_detail_pick == name:
+                stx = tx[tx["종목명"] == name].copy()
+                stx["수량"] = pd.to_numeric(stx["수량"], errors="coerce")
+                stx["단가"] = pd.to_numeric(stx["단가"], errors="coerce")
+                stx["실현손익"] = pd.to_numeric(stx["실현손익"], errors="coerce")
+
+                buy_tx = stx[stx["구분"] == "매수"]
+                sell_tx = stx[stx["구분"] == "매도"]
+                buy_amt = (buy_tx["수량"] * buy_tx["단가"]).sum()
+                sell_amt = (sell_tx["수량"] * sell_tx["단가"]).sum()
+                total_amt = buy_amt + sell_amt
+                realized_pl = sell_tx["실현손익"].sum()
+                rpc = UP_COLOR if realized_pl >= 0 else DOWN_COLOR
+                rpsign = "+" if realized_pl >= 0 else ""
+
+                st.markdown(f"""
+                <div class="stock-detail-panel">
+                    <div class="stock-detail-row"><span>매수</span><b>{len(buy_tx)}회</b><span class="amt">{buy_amt:,.0f}원</span></div>
+                    <div class="stock-detail-row"><span>매도</span><b>{len(sell_tx)}회</b><span class="amt">{sell_amt:,.0f}원</span></div>
+                    <div class="stock-detail-row"><span>총 거래금액</span><b>&nbsp;</b><span class="amt">{total_amt:,.0f}원</span></div>
+                    <div class="stock-detail-row"><span>누적 실현손익</span><b>&nbsp;</b><span class="amt" style="color:{rpc}">{rpsign}{realized_pl:,.0f}원</span></div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # (시세 새로고침 버튼은 상단으로 이동했습니다)
 
