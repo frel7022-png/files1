@@ -1027,64 +1027,31 @@ with tab_port:
     if not rows:
         st.info("보유 종목이 없습니다. '거래 기록' 탭에서 매수를 기록해보세요.")
     else:
-        if "stock_detail_pick" not in st.session_state:
-            st.session_state.stock_detail_pick = None
-
         for r in rows:
-            name = r["종목명"]
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
             psign = "+" if r["손익"] >= 0 else ""
             cc = UP_COLOR if r["등락률"] >= 0 else DOWN_COLOR
             csign = "+" if r["등락률"] >= 0 else ""
             sc = sector_color_map.get(r["섹터"], "#6b7280")
 
-            with st.container():
-                st.markdown(f"""
-                <div class="stock-card-marker"></div>
-                <div class="stock-card">
-                    <div class="stock-top">
-                        <span><span class="stock-name">{name}</span>
-                            <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
-                        <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
-                    </div>
-                    <div class="stock-grid">
-                        <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
-                        <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
-                        <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
-                        <div class="cell">
-                            <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
-                            <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
-                        </div>
+            st.markdown(f"""
+            <div class="stock-card">
+                <div class="stock-top">
+                    <span><span class="stock-name">{r['종목명']}</span>
+                        <span class="stock-weight-inline">비중 {r['비중']:.1f}%</span></span>
+                    <span class="sector-tag" style="background:{sc}22;color:{sc}">{r['섹터']}</span>
+                </div>
+                <div class="stock-grid">
+                    <div class="cell"><div class="top">{r['수량']:.0f}주</div></div>
+                    <div class="cell"><div class="top">{r['현재가']:,.0f}</div><div class="bottom">{r['평단가']:,.0f}</div></div>
+                    <div class="cell"><div class="top">{r['평가금액']:,.0f}</div><div class="bottom">{r['매입금액']:,.0f}</div></div>
+                    <div class="cell">
+                        <div class="top" style="color:{pc}">{psign}{r['손익']:,.0f}</div>
+                        <div class="bottom"><span style="color:{pc}">{psign}{r['손익률']:.1f}%</span> <span style="color:{cc}">{csign}{r['등락률']:.1f}%</span></div>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-                if st.button("", key=f"stock_click_{name}", use_container_width=True):
-                    st.session_state.stock_detail_pick = None if st.session_state.stock_detail_pick == name else name
-                    st.rerun()
-
-            if st.session_state.stock_detail_pick == name:
-                stx = tx[tx["종목명"] == name].copy()
-                stx["수량"] = pd.to_numeric(stx["수량"], errors="coerce")
-                stx["단가"] = pd.to_numeric(stx["단가"], errors="coerce")
-                stx["실현손익"] = pd.to_numeric(stx["실현손익"], errors="coerce")
-
-                buy_tx = stx[stx["구분"] == "매수"]
-                sell_tx = stx[stx["구분"] == "매도"]
-                buy_amt = (buy_tx["수량"] * buy_tx["단가"]).sum()
-                sell_amt = (sell_tx["수량"] * sell_tx["단가"]).sum()
-                total_amt = buy_amt + sell_amt
-                realized_pl = sell_tx["실현손익"].sum()
-                rpc = UP_COLOR if realized_pl >= 0 else DOWN_COLOR
-                rpsign = "+" if realized_pl >= 0 else ""
-
-                st.markdown(f"""
-                <div class="stock-detail-panel">
-                    <div class="stock-detail-row"><span>매수</span><b>{len(buy_tx)}회</b><span class="amt">{buy_amt:,.0f}원</span></div>
-                    <div class="stock-detail-row"><span>매도</span><b>{len(sell_tx)}회</b><span class="amt">{sell_amt:,.0f}원</span></div>
-                    <div class="stock-detail-row"><span>총 거래금액</span><b>&nbsp;</b><span class="amt">{total_amt:,.0f}원</span></div>
-                    <div class="stock-detail-row"><span>누적 실현손익</span><b>&nbsp;</b><span class="amt" style="color:{rpc}">{rpsign}{realized_pl:,.0f}원</span></div>
-                </div>
-                """, unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
 
     # (시세 새로고침 버튼은 상단으로 이동했습니다)
 
