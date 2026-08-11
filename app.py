@@ -28,7 +28,6 @@ SECTOR_HISTORY_FILE = HERE / "sector_history.csv"
 
 HOLD_COLUMNS = ["종목명", "종목코드", "섹터", "수량", "평단가", "현재가", "등락률", "업데이트시각"]
 TX_COLUMNS = ["id", "날짜", "종목명", "구분", "수량", "단가", "실현손익", "메모", "정산반영"]
-EDIT_COLUMNS = ["종목명", "섹터", "수량", "평단가", "현재가"]
 
 UP_COLOR = "#d9364f"    # 국내 관례: 상승/이익 = 빨강
 DOWN_COLOR = "#2b6cd4"  # 하락/손실 = 파랑
@@ -676,6 +675,19 @@ holdings = load_holdings()
 state = load_state()
 tx = load_transactions()
 
+top_l, top_r = st.columns([5, 2])
+with top_r:
+    refresh_clicked_top = st.button("시세 새로고침", use_container_width=True, key="refresh_btn_top")
+st.caption("시세는 네이버 금융 비공식 API 기준이며 지연/실패할 수 있습니다.")
+
+if refresh_clicked_top:
+    with st.spinner("종목명으로 시세를 찾는 중..."):
+        holdings = refresh_all_prices(holdings)
+        df_top, stock_val_top, total_assets_top, unreal_top = compute_metrics(holdings, state["cash"])
+        snapshot_history(total_assets_top, total_assets_top + unreal_top)
+        snapshot_sector_history(compute_sector_weights(df_top))
+    st.rerun()
+
 tab_port, tab_tx = st.tabs(["포트폴리오", "거래 기록"])
 
 # ==================================================================== #
@@ -924,7 +936,7 @@ with tab_port:
     rows = df_sorted.to_dict("records")
 
     if not rows:
-        st.info("보유 종목이 없습니다. 아래 '종목 편집'에서 추가하거나, '거래 기록' 탭에서 매수를 기록해보세요.")
+        st.info("보유 종목이 없습니다. '거래 기록' 탭에서 매수를 기록해보세요.")
     else:
         for r in rows:
             pc = UP_COLOR if r["손익"] >= 0 else DOWN_COLOR
@@ -952,42 +964,9 @@ with tab_port:
             </div>
             """, unsafe_allow_html=True)
 
-    # ---- 새로고침 / 종목 편집 ----
-    col_r, col_e = st.columns([1, 1])
-    with col_r:
-        refresh_clicked = st.button("시세 새로고침", use_container_width=True, key="refresh_btn")
-    with col_e:
-        with st.popover("종목 편집", use_container_width=True):
-            st.caption("종목코드는 몰라도 됩니다 — 종목명만 정확히 입력하면 새로고침할 때 자동으로 찾아옵니다.")
-            edited = st.data_editor(
-                holdings,
-                num_rows="dynamic",
-                use_container_width=True,
-                column_order=EDIT_COLUMNS,
-                column_config={
-                    "종목명": st.column_config.TextColumn(required=True, help="정확한 종목명을 입력하세요 (예: 삼성전자)"),
-                    "섹터": st.column_config.TextColumn(),
-                    "수량": st.column_config.NumberColumn(min_value=0, step=1),
-                    "평단가": st.column_config.NumberColumn(min_value=0, step=100, format="%.0f"),
-                    "현재가": st.column_config.NumberColumn(min_value=0, step=100, format="%.0f"),
-                },
-                key="editor",
-            )
-            if st.button("저장", use_container_width=True, key="save_edit_btn"):
-                save_holdings(edited)
-                st.success("저장했습니다.")
-                st.rerun()
+    # (시세 새로고침 버튼은 상단으로 이동했습니다)
 
-    if refresh_clicked:
-        with st.spinner("종목명으로 시세를 찾는 중..."):
-            holdings = refresh_all_prices(holdings)
-            df2, stock_val2, total_assets2, unreal2 = compute_metrics(holdings, state["cash"])
-            adjusted2 = total_assets2 + unreal2
-            snapshot_history(total_assets2, adjusted2)
-            snapshot_sector_history(compute_sector_weights(df2))
-        st.rerun()
 
-    st.caption("시세는 네이버 금융 비공식 API 기준이며 지연/실패할 수 있습니다.")
 
 # ==================================================================== #
 # 탭 2: 거래 기록 + 자산 추이
