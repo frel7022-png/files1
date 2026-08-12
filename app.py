@@ -584,30 +584,68 @@ def parse_broker_daily_csv(raw: bytes) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+def rebuild_portfolio_from_transactions(tx: pd.DataFrame, initial_capital: float):
+    """transactions.csv 전체를 날짜순으로 처음부터 재생하여 holdings/state/실현손익을 다시 계산.
+    같은 날짜의 CSV 매매일지를 여러 번 업로드해도(=그 날짜 거래가 통째로 교체됨) 항상
+    '최신 업로드 기준'의 정확한 최종 상태가 되도록 하는 단일 진실 공급원(source of truth) 방식."""
+    holdings = pd.DataFrame(columns=HOLD_COLUMNS)
+    state = {"cash": initial_capital, "initial": initial_capital}
+
+    if tx.empty:
+        return holdings, state, tx
+
+    tx_sorted = tx.copy().reset_index(drop=True)
+    tx_sorted["_ord"] = range(len(tx_sorted))
+    tx_sorted = tx_sorted.sort_values(["날짜", "_ord"]).reset_index(drop=True)
+
+    realized_map = {}
+    for _, row in tx_sorted.iterrows():
+        name = row["종목명"]
+        kind = row["구분"]
+        qty = float(row["수량"])
+        price = float(row["단가"])
+        holdings, state, realized = apply_transaction(holdings, state, name, kind, qty, price)
+        if kind == "매도":
+            realized_map[row["id"]] = realized if realized is not None else 0.0
+
+    tx = tx.copy()
+    for tid, val in realized_map.items():
+        tx.loc[tx["id"] == tid, "실현손익"] = val
+
+    return holdings, state, tx
+
+
 def import_daily_trades(parsed: pd.DataFrame, holdings: pd.DataFrame, state: dict,
                          tx: pd.DataFrame, trade_date: str):
-    """파싱된 일일 매매일지를 기존 holdings/state/tx 위에 누적 반영."""
+    """해당 날짜의 매매일지를 반영.
+    증권사 CSV는 '그날 하루 전체 누적' 내역이므로, 같은 날짜에 이미 CSV로 반영된 거래가
+    있으면 전부 지우고 이번 업로드분으로 교체한 뒤, 거래 기록 전체를 처음부터 재생해서
+    holdings/state를 다시 계산한다 (그래야 같은 날 여러 번 올려도 중복 반영되지 않음)."""
+    tx = tx.copy()
+    prior_mask = (tx["날짜"] == trade_date) & (tx["메모"] == "CSV 업로드")
+    replaced_count = int(prior_mask.sum())
+    tx = tx[~prior_mask].reset_index(drop=True)
+
     new_rows = []
     for _, r in parsed.iterrows():
         name = r["종목명"]
         if r["매수수량"] > 0 and r["매수평균가"] > 0:
-            holdings, state, realized = apply_transaction(holdings, state, name, "매수", r["매수수량"], r["매수평균가"])
             new_rows.append({
                 "id": str(uuid.uuid4())[:8], "날짜": trade_date, "종목명": name, "구분": "매수",
                 "수량": r["매수수량"], "단가": r["매수평균가"], "실현손익": "",
                 "메모": "CSV 업로드", "정산반영": True,
             })
         if r["매도수량"] > 0 and r["매도평균가"] > 0:
-            holdings, state, realized = apply_transaction(holdings, state, name, "매도", r["매도수량"], r["매도평균가"])
             new_rows.append({
                 "id": str(uuid.uuid4())[:8], "날짜": trade_date, "종목명": name, "구분": "매도",
-                "수량": r["매도수량"], "단가": r["매도평균가"],
-                "실현손익": realized if realized is not None else "",
+                "수량": r["매도수량"], "단가": r["매도평균가"], "실현손익": "",
                 "메모": "CSV 업로드", "정산반영": True,
             })
     if new_rows:
         tx = pd.concat([tx, pd.DataFrame(new_rows)], ignore_index=True)
-    return holdings, state, tx, len(new_rows)
+
+    holdings2, state2, tx2 = rebuild_portfolio_from_transactions(tx, state.get("initial", 10_000_000.0))
+    return holdings2, state2, tx2, len(new_rows), replaced_count
 
 
 # ------------------------------------------------------------------ #
@@ -1351,7 +1389,7 @@ with tab_tx:
 
     # ---- 매매일지 CSV 업로드 ----
     st.markdown("##### 매매일지 업로드 (CSV)")
-    st.caption("증권사에서 받은 일일 매매일지 CSV를 올리면 기존 기록 위에 자동으로 누적 반영됩니다.")
+    st.caption("같은 날짜에 다시 올리면 그날 내용은 최신 업로드로 교체되고, 다른 날짜 기록은 그대로 유지됩니다.")
 
     up_file = st.file_uploader("CSV 파일 선택", type=["csv"], key="daily_csv_uploader")
     up_date = st.date_input("거래 날짜", value=date.today(), key="daily_csv_date")
@@ -1378,7 +1416,7 @@ with tab_tx:
                     st.warning("파일에서 종목 데이터를 찾지 못했어요. 형식을 확인해주세요.")
                 else:
                     trade_date_str = up_date.strftime("%Y-%m-%d")
-                    holdings2, state2, tx2, n = import_daily_trades(parsed, holdings, state, tx, trade_date_str)
+                    holdings2, state2, tx2, n, replaced = import_daily_trades(parsed, holdings, state, tx, trade_date_str)
                     if n == 0:
                         st.info("이 파일에는 매수/매도 내역이 없어요 (반영할 거래가 없음).")
                     else:
@@ -1395,8 +1433,26 @@ with tab_tx:
                         }])], ignore_index=True)
                         save_import_log(import_log)
 
-                        st.success(f"{n}건의 거래를 반영했어요 ({trade_date_str} 기준).")
+                        msg = f"{n}건의 거래를 반영했어요 ({trade_date_str} 기준)."
+                        if replaced:
+                            msg += f" (같은 날짜에 이미 있던 CSV 기록 {replaced}건은 이번 내용으로 교체됨)"
+                        st.success(msg)
                         st.rerun()
+
+    with st.expander("포트폴리오 다시 계산하기 (문제 생겼을 때만)", expanded=False):
+        st.caption("보유 수량/현금이 이상하게 꼬였을 때 사용하세요. 거래 기록(transactions.csv) 전체를 "
+                   "처음부터 다시 재생해서 보유종목/현금/실현손익을 정확히 재계산합니다. "
+                   "거래 기록 자체는 지워지지 않습니다.")
+        if st.button("지금 다시 계산하기", key="rebuild_btn", use_container_width=True):
+            holdings_r, state_r, tx_r = rebuild_portfolio_from_transactions(tx, state.get("initial", 10_000_000.0))
+            save_holdings(holdings_r)
+            save_state(state_r)
+            save_transactions(tx_r)
+            df_r, val_r, total_r, unreal_r = compute_metrics(holdings_r, state_r["cash"])
+            snapshot_history(total_r, total_r + unreal_r)
+            snapshot_sector_history(compute_sector_weights(df_r))
+            st.success("거래 기록 기준으로 포트폴리오를 다시 계산했어요.")
+            st.rerun()
 
     st.divider()
 
