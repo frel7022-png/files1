@@ -166,6 +166,12 @@ def _github_api_url(local_path: Path, prefix: str) -> str:
     return f"https://api.github.com/repos/{repo}/contents/{file_path}"
 
 
+def _github_log(filename: str, action: str, ok: bool, detail: str = "") -> None:
+    log = st.session_state.setdefault("github_sync_log", [])
+    log.append({"file": filename, "action": action, "ok": ok, "detail": detail})
+    st.session_state["github_sync_log"] = log[-30:]  # 최근 30건만 유지
+
+
 def github_fetch_file(local_path: Path) -> bool:
     """로컬에 파일이 없을 때 GitHub 레포의 최신본을 받아와 로컬에 저장. 성공 시 True."""
     token, repo, branch, prefix = _github_cfg()
@@ -178,17 +184,26 @@ def github_fetch_file(local_path: Path) -> bool:
         if r.status_code == 200:
             content = base64.b64decode(r.json()["content"])
             local_path.write_bytes(content)
+            _github_log(local_path.name, "fetch", True)
             return True
-    except Exception:
-        pass
+        elif r.status_code == 404:
+            _github_log(local_path.name, "fetch", False, "GitHub에 이 파일이 아직 없음(404) — 신규 생성 예정")
+        else:
+            _github_log(local_path.name, "fetch", False, f"HTTP {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        _github_log(local_path.name, "fetch", False, f"예외: {e}")
     return False
 
 
-def github_commit_file(local_path: Path, message: str) -> None:
-    """로컬 CSV 저장 직후, GitHub 레포에도 동일 내용을 커밋(생성 또는 업데이트)."""
+def github_commit_file(local_path: Path, message: str) -> bool:
+    """로컬 CSV 저장 직후, GitHub 레포에도 동일 내용을 커밋(생성 또는 업데이트). 성공 시 True."""
     token, repo, branch, prefix = _github_cfg()
-    if not token or not local_path.exists():
-        return
+    if not token:
+        _github_log(local_path.name, "commit", False, "GitHub secrets(token)이 설정되어 있지 않음")
+        return False
+    if not local_path.exists():
+        _github_log(local_path.name, "commit", False, "로컬 파일이 존재하지 않음")
+        return False
     try:
         url = _github_api_url(local_path, prefix)
         headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
@@ -198,13 +213,23 @@ def github_commit_file(local_path: Path, message: str) -> None:
         r = requests.get(url, headers=headers, params={"ref": branch}, timeout=10)
         if r.status_code == 200:
             sha = r.json().get("sha")
+        elif r.status_code not in (200, 404):
+            _github_log(local_path.name, "commit", False, f"sha 조회 실패 HTTP {r.status_code}: {r.text[:200]}")
+            return False
 
         payload = {"message": message, "content": content_b64, "branch": branch}
         if sha:
             payload["sha"] = sha
-        requests.put(url, headers=headers, json=payload, timeout=10)
-    except Exception:
-        pass  # 네트워크/권한 문제로 커밋 실패해도 앱 동작 자체는 계속되게
+        put_r = requests.put(url, headers=headers, json=payload, timeout=10)
+        if put_r.status_code in (200, 201):
+            _github_log(local_path.name, "commit", True)
+            return True
+        else:
+            _github_log(local_path.name, "commit", False, f"HTTP {put_r.status_code}: {put_r.text[:300]}")
+            return False
+    except Exception as e:
+        _github_log(local_path.name, "commit", False, f"예외: {e}")
+        return False
 
 
 # ------------------------------------------------------------------ #
@@ -1453,6 +1478,23 @@ with tab_tx:
             snapshot_sector_history(compute_sector_weights(df_r))
             st.success("거래 기록 기준으로 포트폴리오를 다시 계산했어요.")
             st.rerun()
+
+    with st.expander("GitHub 동기화 상태 (진단용)", expanded=False):
+        token_set, repo_set, branch_set, _ = _github_cfg()
+        if not token_set:
+            st.warning("GitHub secrets(token/repo)가 설정되어 있지 않아요 — 지금은 로컬 저장만 되고 있어요.")
+        else:
+            st.caption(f"레포: {repo_set} ({branch_set} 브랜치)로 동기화 중")
+        sync_log = st.session_state.get("github_sync_log", [])
+        if not sync_log:
+            st.caption("아직 이번 세션에서 GitHub 동기화가 시도된 적이 없어요.")
+        else:
+            for entry in reversed(sync_log[-15:]):
+                icon = "✅" if entry["ok"] else "❌"
+                line = f"{icon} [{entry['action']}] {entry['file']}"
+                if entry["detail"]:
+                    line += f" — {entry['detail']}"
+                st.caption(line)
 
     st.divider()
 
