@@ -53,6 +53,7 @@ SECTOR_GROUP_MAP = {
     "제지": "소비재",
     "섬유의류": "소비재",
     "화장품": "소비재",
+    "가구": "소비재",
     "제약바이오": "의료바이오",
     "제약바이어": "의료바이오",  # 오타 대비
     "의료기기": "의료바이오",
@@ -61,6 +62,30 @@ SECTOR_GROUP_MAP = {
     "엔터테인먼트": "엔터",
     "게임": "엔터",
     "렌탈서비스": "서비스",
+    "에너지기자재": "에너지",
+    "지주(에너지)": "에너지",
+    "에너지": "에너지",
+    "지주(방산소재)": "방산",
+    "금속가공": "금속철강",
+    "전자부품": "전기전자",
+    "전기전자부품": "전기전자",
+}
+
+# 종목명 → 섹터 자동 매핑 (신규 종목이 CSV로 들어올 때 "미분류" 대신 자동 지정, 기존 미분류 종목도 자동 보정)
+STOCK_SECTOR_MAP = {
+    "유한양행": "제약바이오",
+    "사조대림": "식품",
+    "SGC에너지": "에너지",
+    "크라운해태홀딩스": "식품",
+    "서흥": "제약바이오",
+    "율촌화학": "제지",
+    "한샘": "가구",
+    "계룡건설": "건설",
+    "이마트": "유통",
+    "필옵틱스": "반도체장비",
+    "종근당": "제약바이오",
+    "심텍": "반도체장비",
+    "한화시스템": "지주(방산소재)",
 }
 
 # 섹터별 목표 비중(주식 총자산 대비, %). 아직 정하지 않은 섹터는 포함하지 않음 — 추후 추가.
@@ -127,6 +152,10 @@ def load_holdings() -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
         for col in ("종목명", "종목코드", "섹터", "업데이트시각"):
             df[col] = df[col].apply(clean_str)
+        # 미분류 종목명이 STOCK_SECTOR_MAP에 등록돼 있으면 자동으로 섹터 보정
+        needs_fix = (df["섹터"].isin(["", "미분류"])) & (df["종목명"].isin(STOCK_SECTOR_MAP.keys()))
+        if needs_fix.any():
+            df.loc[needs_fix, "섹터"] = df.loc[needs_fix, "종목명"].map(STOCK_SECTOR_MAP)
         return df[HOLD_COLUMNS]
     return pd.DataFrame(columns=HOLD_COLUMNS)
 
@@ -394,7 +423,7 @@ def apply_transaction(holdings: pd.DataFrame, state: dict, name: str, kind: str,
                 holdings.loc[i, "현재가"] = price
         else:
             new_row = {c: "" for c in HOLD_COLUMNS}
-            new_row.update({"종목명": name, "종목코드": "", "섹터": "미분류",
+            new_row.update({"종목명": name, "종목코드": "", "섹터": STOCK_SECTOR_MAP.get(name, "미분류"),
                              "수량": qty, "평단가": price, "현재가": price,
                              "등락률": 0, "업데이트시각": now_kst_str()})
             holdings = pd.concat([holdings, pd.DataFrame([new_row])], ignore_index=True)
