@@ -7,6 +7,7 @@
 """
 
 import calendar
+import base64
 import hashlib
 import io
 import uuid
@@ -140,9 +141,78 @@ def clean_str(x) -> str:
 
 
 # ------------------------------------------------------------------ #
+# GitHub 데이터 동기화 (재배포/컨테이너 재시작으로 로컬 CSV가 사라져도 복구되게)
+# ------------------------------------------------------------------ #
+def _github_cfg():
+    """.streamlit/secrets.toml 의 [github] 섹션에서 설정을 읽어옴.
+    예:
+        [github]
+        token = "ghp_xxx..."
+        repo = "username/reponame"
+        branch = "main"
+        # path_prefix = "data/"   # 선택: 레포 내 하위 폴더에 저장하고 싶을 때
+    미설정 시 GitHub 동기화 없이 로컬 디스크만 사용(조용히 스킵).
+    """
+    try:
+        gh = st.secrets["github"]
+        return gh["token"], gh["repo"], gh.get("branch", "main"), gh.get("path_prefix", "")
+    except Exception:
+        return None, None, None, None
+
+
+def _github_api_url(local_path: Path, prefix: str) -> str:
+    token, repo, branch, _ = _github_cfg()
+    file_path = f"{prefix}{local_path.name}" if prefix else local_path.name
+    return f"https://api.github.com/repos/{repo}/contents/{file_path}"
+
+
+def github_fetch_file(local_path: Path) -> bool:
+    """로컬에 파일이 없을 때 GitHub 레포의 최신본을 받아와 로컬에 저장. 성공 시 True."""
+    token, repo, branch, prefix = _github_cfg()
+    if not token:
+        return False
+    try:
+        url = _github_api_url(local_path, prefix)
+        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+        r = requests.get(url, headers=headers, params={"ref": branch}, timeout=10)
+        if r.status_code == 200:
+            content = base64.b64decode(r.json()["content"])
+            local_path.write_bytes(content)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def github_commit_file(local_path: Path, message: str) -> None:
+    """로컬 CSV 저장 직후, GitHub 레포에도 동일 내용을 커밋(생성 또는 업데이트)."""
+    token, repo, branch, prefix = _github_cfg()
+    if not token or not local_path.exists():
+        return
+    try:
+        url = _github_api_url(local_path, prefix)
+        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+        content_b64 = base64.b64encode(local_path.read_bytes()).decode()
+
+        sha = None
+        r = requests.get(url, headers=headers, params={"ref": branch}, timeout=10)
+        if r.status_code == 200:
+            sha = r.json().get("sha")
+
+        payload = {"message": message, "content": content_b64, "branch": branch}
+        if sha:
+            payload["sha"] = sha
+        requests.put(url, headers=headers, json=payload, timeout=10)
+    except Exception:
+        pass  # 네트워크/권한 문제로 커밋 실패해도 앱 동작 자체는 계속되게
+
+
+# ------------------------------------------------------------------ #
 # 데이터 로드 / 저장
 # ------------------------------------------------------------------ #
 def load_holdings() -> pd.DataFrame:
+    if not HOLDINGS_FILE.exists():
+        github_fetch_file(HOLDINGS_FILE)
     if HOLDINGS_FILE.exists():
         df = pd.read_csv(HOLDINGS_FILE, dtype={"종목코드": str}, keep_default_na=False, na_values=[""])
         for col in HOLD_COLUMNS:
@@ -162,9 +232,12 @@ def load_holdings() -> pd.DataFrame:
 
 def save_holdings(df: pd.DataFrame) -> None:
     df.to_csv(HOLDINGS_FILE, index=False)
+    github_commit_file(HOLDINGS_FILE, "portfolio_data.csv 업데이트")
 
 
 def load_transactions() -> pd.DataFrame:
+    if not TX_FILE.exists():
+        github_fetch_file(TX_FILE)
     if TX_FILE.exists():
         df = pd.read_csv(TX_FILE, dtype={"id": str}, keep_default_na=False, na_values=[""])
         for col in TX_COLUMNS:
@@ -176,9 +249,12 @@ def load_transactions() -> pd.DataFrame:
 
 def save_transactions(df: pd.DataFrame) -> None:
     df.to_csv(TX_FILE, index=False)
+    github_commit_file(TX_FILE, "transactions.csv 업데이트")
 
 
 def load_state() -> dict:
+    if not STATE_FILE.exists():
+        github_fetch_file(STATE_FILE)
     if STATE_FILE.exists():
         df = pd.read_csv(STATE_FILE)
         return {"cash": float(df.loc[0, "예수금"]), "initial": float(df.loc[0, "최초자본"])}
@@ -187,9 +263,12 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     pd.DataFrame([{"예수금": state["cash"], "최초자본": state["initial"]}]).to_csv(STATE_FILE, index=False)
+    github_commit_file(STATE_FILE, "account_state.csv 업데이트")
 
 
 def load_history() -> pd.DataFrame:
+    if not HISTORY_FILE.exists():
+        github_fetch_file(HISTORY_FILE)
     if HISTORY_FILE.exists():
         return pd.read_csv(HISTORY_FILE)
     return pd.DataFrame(columns=["날짜", "총자산", "조정자산"])
@@ -197,6 +276,7 @@ def load_history() -> pd.DataFrame:
 
 def save_history(df: pd.DataFrame) -> None:
     df.to_csv(HISTORY_FILE, index=False)
+    github_commit_file(HISTORY_FILE, "asset_history.csv 업데이트")
 
 
 def snapshot_history(total_assets: float, adjusted_assets: float) -> None:
@@ -209,6 +289,8 @@ def snapshot_history(total_assets: float, adjusted_assets: float) -> None:
 
 
 def load_sector_history() -> pd.DataFrame:
+    if not SECTOR_HISTORY_FILE.exists():
+        github_fetch_file(SECTOR_HISTORY_FILE)
     if SECTOR_HISTORY_FILE.exists():
         return pd.read_csv(SECTOR_HISTORY_FILE)
     return pd.DataFrame(columns=["날짜", "섹터그룹", "비중"])
@@ -216,6 +298,7 @@ def load_sector_history() -> pd.DataFrame:
 
 def save_sector_history(df: pd.DataFrame) -> None:
     df.to_csv(SECTOR_HISTORY_FILE, index=False)
+    github_commit_file(SECTOR_HISTORY_FILE, "sector_history.csv 업데이트")
 
 
 def snapshot_sector_history(weights: dict) -> None:
@@ -447,6 +530,8 @@ def apply_transaction(holdings: pd.DataFrame, state: dict, name: str, kind: str,
 
 
 def load_import_log() -> pd.DataFrame:
+    if not IMPORT_LOG_FILE.exists():
+        github_fetch_file(IMPORT_LOG_FILE)
     if IMPORT_LOG_FILE.exists():
         return pd.read_csv(IMPORT_LOG_FILE, dtype=str)
     return pd.DataFrame(columns=["hash", "날짜", "처리시각"])
@@ -454,6 +539,7 @@ def load_import_log() -> pd.DataFrame:
 
 def save_import_log(df: pd.DataFrame) -> None:
     df.to_csv(IMPORT_LOG_FILE, index=False)
+    github_commit_file(IMPORT_LOG_FILE, "import_log.csv 업데이트")
 
 
 def parse_broker_daily_csv(raw: bytes) -> pd.DataFrame:
